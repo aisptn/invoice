@@ -5,7 +5,13 @@ const TRANSLATIONS = {
         clearButton: 'clear',
         clearConfirmation: 'Are you sure you want to clear the form? This action cannot be undone.',
         formatButton: 'format: ',
+        formatPng: 'png',
         copyButton: 'copy',
+        copySuccess: 'Copied as PNG.',
+        copyUnsupported: 'Copy as PNG is not supported in this browser. Downloading instead.',
+        copyFailed: 'Copy failed. Downloading instead.',
+        copyRenderFailed: 'Could not render the invoice as a PNG image.',
+        copyDownloadSuccess: 'Clipboard copy was unavailable, so the PNG was downloaded instead.',
         themeButton: 'theme: ',
         themeAuto: 'auto',
         themeLight: 'light',
@@ -27,7 +33,13 @@ const TRANSLATIONS = {
         clearConfirmation: 'Yakin ingin menghapus formulir? Tindakan ini tidak dapat dibatalkan.',
         saveButton: 'simpan',
         formatButton: 'format: ',
+        formatPng: 'png',
         copyButton: 'salin',
+        copySuccess: 'Tersalin sebagai PNG.',
+        copyUnsupported: 'Salin sebagai PNG tidak didukung di browser ini. Mengunduh sebagai gantinya.',
+        copyFailed: 'Gagal menyalin. Mengunduh sebagai gantinya.',
+        copyRenderFailed: 'Tidak dapat merender invoice sebagai gambar PNG.',
+        copyDownloadSuccess: 'Salin ke clipboard tidak tersedia, jadi PNG diunduh sebagai gantinya.',
         themeButton: 'tema: ',
         themeAuto: 'otomatis',
         themeLight: 'terang',
@@ -52,12 +64,14 @@ const messages = TRANSLATIONS[locale];
 const numberFormatter = new Intl.NumberFormat(locale);
 const STORAGE_KEY = 'invoice-form-data';
 const THEME_STORAGE_KEY = 'invoice-theme';
+const COPY_FORMAT_STORAGE_KEY = 'invoice-copy-format';
 const THEME_MODES = ['auto', 'light', 'dark'];
 const THEME_META_CONTENT = {
     auto: 'dark light',
     light: 'light',
     dark: 'dark'
 };
+const COPY_FORMATS = ['png'];
 
 function createElement(tagName, options = {}) {
     const element = document.createElement(tagName);
@@ -118,10 +132,10 @@ function createAppShell() {
             { id: 'clear', translationKey: 'clearButton' },
             { id: 'open', translationKey: 'openButton', disabled: true },
             { id: 'save', translationKey: 'saveButton', disabled: true },
-            { id: 'copy', translationKey: 'copyButton', disabled: true }
+            { id: 'copy', translationKey: 'copyButton' }
         ],
         [
-            { id: 'format', translationKey: 'formatButton', disabled: true },
+            { id: 'format', translationKey: 'formatButton' },
             { id: 'theme', translationKey: 'themeButton' }
         ]
     ];
@@ -186,6 +200,8 @@ function createAppShell() {
 createAppShell();
 
 const clearButton = document.getElementById('clear');
+const copyButton = document.getElementById('copy');
+const formatButton = document.getElementById('format');
 const themeButton = document.getElementById('theme');
 const colorSchemeMeta = document.querySelector('meta[name="color-scheme"]');
 
@@ -216,6 +232,13 @@ function updateThemeButton(mode) {
 
     const modeLabel = messages[`theme${mode[0].toUpperCase()}${mode.slice(1)}`] ?? mode;
     themeButton.textContent = `${messages.themeButton}${modeLabel}`;
+}
+
+function updateFormatButton(format) {
+    if (!formatButton) return;
+
+    const formatLabel = messages[`format${format[0].toUpperCase()}${format.slice(1)}`] ?? format;
+    formatButton.textContent = `${messages.formatButton}${formatLabel}`;
 }
 
 clearButton.addEventListener('click', () => {
@@ -250,6 +273,196 @@ function toggleTheme() {
 }
 
 themeButton?.addEventListener('click', toggleTheme);
+
+function setCopyFormat(format) {
+    const nextFormat = COPY_FORMATS.includes(format) ? format : COPY_FORMATS[0];
+    localStorage.setItem(COPY_FORMAT_STORAGE_KEY, nextFormat);
+    updateFormatButton(nextFormat);
+}
+
+function toggleCopyFormat() {
+    const currentFormat = localStorage.getItem(COPY_FORMAT_STORAGE_KEY) || COPY_FORMATS[0];
+    const currentIndex = COPY_FORMATS.indexOf(currentFormat);
+    const nextFormat = COPY_FORMATS[(currentIndex + 1) % COPY_FORMATS.length];
+
+    setCopyFormat(nextFormat);
+}
+
+async function renderSectionToBlob(type) {
+    const formState = collectFormState();
+    const rows = formState.rows.filter(hasMeaningfulRowData);
+    const section = document.querySelector('main section');
+    const sectionStyles = section instanceof HTMLElement ? getComputedStyle(section) : null;
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) return null;
+
+    const pageWidth = 794;
+    const padding = 40;
+    const rowHeight = 32;
+    const headerHeight = 28;
+    const titleHeight = 42;
+    const metaHeight = 32;
+    const totalHeight = 40;
+    const contentRows = Math.max(rows.length, 1);
+    const pageHeight =
+        padding * 2 + titleHeight + metaHeight + headerHeight + contentRows * rowHeight + totalHeight;
+    const columnWidths = [0.4, 0.1, 0.2, 0.3].map((fraction) => Math.round((pageWidth - padding * 2) * fraction));
+    const columnOffsets = columnWidths.reduce((offsets, width, index) => {
+        const previousOffset = offsets[index - 1] ?? padding;
+        offsets.push(index === 0 ? padding : previousOffset + columnWidths[index - 1]);
+        return offsets;
+    }, []);
+    const textColor = sectionStyles?.color || '#000000';
+    const borderColor = sectionStyles?.borderColor || '#000000';
+    const backgroundColor = sectionStyles?.backgroundColor || '#ffffff';
+    const mutedColor = '#666666';
+
+    canvas.width = pageWidth;
+    canvas.height = pageHeight;
+
+    console.log('Rendering invoice section to blob.', {
+        type,
+        width: pageWidth,
+        height: pageHeight,
+        rowCount: rows.length
+    });
+
+    context.fillStyle = backgroundColor;
+    context.fillRect(0, 0, pageWidth, pageHeight);
+    context.strokeStyle = borderColor;
+    context.lineWidth = 1;
+    context.strokeRect(0.5, 0.5, pageWidth - 1, pageHeight - 1);
+
+    let y = padding;
+
+    context.fillStyle = textColor;
+    context.font = '700 24px Arial';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText(messages.heading, pageWidth / 2, y + titleHeight / 2);
+    y += titleHeight;
+
+    context.font = '16px Arial';
+    context.textAlign = 'left';
+    context.fillText((formState.customerName || messages.customerNamePlaceholder).toUpperCase(), padding, y + metaHeight / 2);
+    context.textAlign = 'right';
+    context.fillText(formState.orderDate || '', pageWidth - padding, y + metaHeight / 2);
+    y += metaHeight;
+
+    context.beginPath();
+    context.moveTo(padding, y);
+    context.lineTo(pageWidth - padding, y);
+    context.stroke();
+
+    context.font = '700 14px Arial';
+    context.fillStyle = textColor;
+    context.textAlign = 'left';
+    context.fillText(messages.itemLabel, columnOffsets[0] + 8, y + headerHeight / 2);
+    context.textAlign = 'right';
+    context.fillText(messages.qtyLabel, columnOffsets[1] + columnWidths[1] - 8, y + headerHeight / 2);
+    context.fillText(messages.priceLabel, columnOffsets[2] + columnWidths[2] - 8, y + headerHeight / 2);
+    context.fillText(messages.sumLabel, columnOffsets[3] + columnWidths[3] - 8, y + headerHeight / 2);
+    y += headerHeight;
+
+    context.beginPath();
+    context.moveTo(padding, y);
+    context.lineTo(pageWidth - padding, y);
+    context.stroke();
+
+    context.font = '14px Arial';
+    rows.concat(rows.length ? [] : [{ item: '', qty: '1', price: '0' }]).forEach((row) => {
+        const quantity = Number(row.qty || 0);
+        const price = Number(row.price || 0);
+        const subtotal = quantity * price;
+
+        context.fillStyle = textColor;
+        context.textAlign = 'left';
+        context.fillText((row.item || '').toUpperCase(), columnOffsets[0] + 8, y + rowHeight / 2);
+        context.textAlign = 'right';
+        context.fillText(formatNumber(quantity), columnOffsets[1] + columnWidths[1] - 8, y + rowHeight / 2);
+        context.fillText(formatNumber(price), columnOffsets[2] + columnWidths[2] - 8, y + rowHeight / 2);
+        context.fillText(formatNumber(subtotal), columnOffsets[3] + columnWidths[3] - 8, y + rowHeight / 2);
+
+        context.strokeStyle = mutedColor;
+        context.beginPath();
+        context.moveTo(padding, y + rowHeight);
+        context.lineTo(pageWidth - padding, y + rowHeight);
+        context.stroke();
+
+        y += rowHeight;
+    });
+
+    const total = rows.reduce((sum, row) => sum + Number(row.qty || 0) * Number(row.price || 0), 0);
+    context.font = '700 16px Arial';
+    context.fillStyle = textColor;
+    context.textAlign = 'right';
+    context.fillText(messages.totalLabel, columnOffsets[2] + columnWidths[2] - 8, y + totalHeight / 2);
+    context.fillText(formatNumber(total), columnOffsets[3] + columnWidths[3] - 8, y + totalHeight / 2);
+
+    return await new Promise((resolve) => {
+        canvas.toBlob(resolve, type, 0.95);
+    });
+}
+
+function downloadBlob(blob, extension) {
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    link.href = objectUrl;
+    link.download = `invoice.${extension}`;
+    link.click();
+
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
+
+async function copySectionAsImage() {
+    const format = localStorage.getItem(COPY_FORMAT_STORAGE_KEY) || COPY_FORMATS[0];
+    const mimeType = `image/${format}`;
+    const extension = format;
+
+    let blob;
+
+    try {
+        blob = await renderSectionToBlob(mimeType);
+        if (!blob) {
+            console.error('Invoice render returned no blob.', { format, mimeType });
+            alert(messages.copyRenderFailed);
+            return;
+        }
+        console.log('Invoice blob rendered successfully.', { format, mimeType, size: blob.size });
+    } catch {
+        console.error('Invoice render failed.', { format, mimeType });
+        alert(messages.copyRenderFailed);
+        return;
+    }
+
+    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+        console.warn('Clipboard image write unsupported, falling back to download.', { format, mimeType });
+        downloadBlob(blob, extension);
+        alert(messages.copyUnsupported);
+        return;
+    }
+
+    try {
+        console.log('Attempting clipboard image write.', { format, mimeType, size: blob.size });
+        await navigator.clipboard.write([
+            new ClipboardItem({ [mimeType]: blob })
+        ]);
+
+        console.log('Clipboard image write succeeded.', { format, mimeType });
+        alert(messages.copySuccess);
+    } catch {
+        console.error('Clipboard image write failed, falling back to download.', { format, mimeType });
+        downloadBlob(blob, extension);
+        alert(`${messages.copyFailed}\n${messages.copyDownloadSuccess}`);
+    }
+}
+
+formatButton?.addEventListener('click', toggleCopyFormat);
+copyButton?.addEventListener('click', () => {
+    void copySectionAsImage();
+});
 
 const orderDate = document.getElementById('order-date');
 if (orderDate) {
@@ -311,6 +524,14 @@ const formatNumber = (value) => numberFormatter.format(Number(value) || 0);
 const isFormattedNumberInput = (input) =>
     input instanceof HTMLInputElement && /^(qty|price)-/.test(input.id);
 const getNumberValue = (input) => Number(sanitizeNumberInput(input?.value)) || 0;
+const stepNumberInput = (input, delta) => {
+    if (!isFormattedNumberInput(input)) return;
+
+    const nextValue = Math.max(0, getNumberValue(input) + delta);
+    input.value = String(nextValue);
+    updateInvoiceTotal();
+    saveFormState();
+};
 const isTrackedInput = (target) => target instanceof HTMLInputElement && !!target.closest('form');
 const isInteractiveControl = (target) =>
     target instanceof HTMLElement && !!target.closest('button, a, select, textarea, label');
@@ -565,6 +786,7 @@ function getOrAppendNextRow(row) {
 }
 
 initializeInvoiceTable();
+setCopyFormat(localStorage.getItem(COPY_FORMAT_STORAGE_KEY) || COPY_FORMATS[0]);
 setTheme(localStorage.getItem(THEME_STORAGE_KEY) || 'auto');
 restoreFormState(loadFormState());
 updateInvoiceTotal();
@@ -626,8 +848,22 @@ document.addEventListener('focusout', ({ target }) => {
     saveFormState();
 });
 
+document.addEventListener('wheel', (event) => {
+    if (!isFormattedNumberInput(event.target)) return;
+    if (document.activeElement !== event.target) return;
+
+    event.preventDefault();
+    stepNumberInput(event.target, event.deltaY < 0 ? 1 : -1);
+}, { passive: false });
+
 document.addEventListener('keydown', (event) => {
     if (!(event.target instanceof HTMLInputElement)) return;
+
+    if (isFormattedNumberInput(event.target) && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+        event.preventDefault();
+        stepNumberInput(event.target, event.key === 'ArrowUp' ? 1 : -1);
+        return;
+    }
 
     if (event.key === 'Enter') {
         event.preventDefault();
