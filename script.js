@@ -110,6 +110,28 @@ function createElement(tagName, options = {}) {
     return element;
 }
 
+function resolveThemeColors() {
+    const probe = document.createElement('div');
+    probe.style.backgroundColor = 'canvas';
+    probe.style.color = 'canvasText';
+    probe.style.border = '1px solid canvasText';
+    probe.style.position = 'fixed';
+    probe.style.pointerEvents = 'none';
+    probe.style.opacity = '0';
+    document.body.append(probe);
+
+    const styles = getComputedStyle(probe);
+    const colors = {
+        backgroundColor: styles.backgroundColor,
+        textColor: styles.color,
+        borderColor: styles.borderTopColor
+    };
+
+    probe.remove();
+
+    return colors;
+}
+
 function createToolbarButton(id, translationKey, { disabled = false } = {}) {
     return createElement('button', {
         dataset: { i18n: translationKey },
@@ -293,115 +315,190 @@ async function renderSectionToBlob(type) {
     const rows = formState.rows.filter(hasMeaningfulRowData);
     const section = document.querySelector('main section');
     const sectionStyles = section instanceof HTMLElement ? getComputedStyle(section) : null;
+    const sectionRect = section instanceof HTMLElement ? section.getBoundingClientRect() : null;
+    const heading = section?.querySelector('h1');
+    const form = section?.querySelector('form');
+    const customerFieldset = form?.querySelector('fieldset');
+    const table = form?.querySelector('table');
+    const firstItemRow = getItemRows()[0];
+    const firstItemInput = getRowField(firstItemRow, 'item');
+    const firstQtyInput = getRowField(firstItemRow, 'qty');
+    const firstPriceInput = getRowField(firstItemRow, 'price');
+    const totalOutput = getTotalOutput();
+    const rootStyles = getComputedStyle(document.body);
+    const headingStyles = heading ? getComputedStyle(heading) : rootStyles;
+    const fieldsetStyles = customerFieldset ? getComputedStyle(customerFieldset) : rootStyles;
+    const tableStyles = table ? getComputedStyle(table) : rootStyles;
+    const itemInputStyles = firstItemInput ? getComputedStyle(firstItemInput) : rootStyles;
+    const qtyInputStyles = firstQtyInput ? getComputedStyle(firstQtyInput) : rootStyles;
+    const priceInputStyles = firstPriceInput ? getComputedStyle(firstPriceInput) : rootStyles;
+    const totalOutputStyles = totalOutput ? getComputedStyle(totalOutput) : rootStyles;
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
     if (!context) return null;
-
-    const pageWidth = 794;
-    const padding = 40;
-    const rowHeight = 32;
-    const headerHeight = 28;
-    const titleHeight = 42;
-    const metaHeight = 32;
-    const totalHeight = 40;
+    const parsePixels = (value, fallback = 0) => Number.parseFloat(value) || fallback;
+    const pageWidth = sectionRect?.width || 794;
+    const sectionPadding = parsePixels(sectionStyles?.paddingTop, 40);
+    const sectionGap = parsePixels(sectionStyles?.gap, 24);
+    const fieldHorizontalPadding = parsePixels(itemInputStyles.paddingLeft, 8);
+    const titleHeight = parsePixels(headingStyles.lineHeight, parsePixels(headingStyles.fontSize, 24) * 1.2);
+    const metaHeight = Math.max(
+        parsePixels(itemInputStyles.lineHeight, parsePixels(itemInputStyles.fontSize, 16) * 1.2) +
+            parsePixels(itemInputStyles.paddingTop, 8) +
+            parsePixels(itemInputStyles.paddingBottom, 8),
+        parsePixels(fieldsetStyles.lineHeight, 32)
+    );
+    const headerHeight =
+        parsePixels(tableStyles.fontSize, 14) * 1.2 +
+        parsePixels(tableStyles.borderSpacing, 0) +
+        16;
+    const rowHeight = Math.max(
+        parsePixels(itemInputStyles.lineHeight, parsePixels(itemInputStyles.fontSize, 14) * 1.2) +
+            parsePixels(itemInputStyles.paddingTop, 8) +
+            parsePixels(itemInputStyles.paddingBottom, 8),
+        34
+    );
+    const totalHeight = Math.max(
+        parsePixels(totalOutputStyles.lineHeight, parsePixels(totalOutputStyles.fontSize, 16) * 1.2) +
+            parsePixels(totalOutputStyles.paddingTop, 8) +
+            parsePixels(totalOutputStyles.paddingBottom, 8),
+        40
+    );
+    const horizontalPadding = parsePixels(sectionStyles?.paddingLeft, sectionPadding);
+    const bottomPadding = parsePixels(sectionStyles?.paddingBottom, sectionPadding);
+    const headerHorizontalPadding = 16;
     const contentRows = Math.max(rows.length, 1);
     const pageHeight =
-        padding * 2 + titleHeight + metaHeight + headerHeight + contentRows * rowHeight + totalHeight;
-    const columnWidths = [0.4, 0.1, 0.2, 0.3].map((fraction) => Math.round((pageWidth - padding * 2) * fraction));
-    const columnOffsets = columnWidths.reduce((offsets, width, index) => {
-        const previousOffset = offsets[index - 1] ?? padding;
-        offsets.push(index === 0 ? padding : previousOffset + columnWidths[index - 1]);
-        return offsets;
+        sectionPadding +
+        titleHeight +
+        sectionGap +
+        metaHeight +
+        sectionGap +
+        headerHeight +
+        contentRows * rowHeight +
+        totalHeight +
+        bottomPadding;
+    const tableWidth = pageWidth - horizontalPadding * 2;
+    const columnWidths = [0.4, 0.1, 0.2, 0.3].map((fraction) => tableWidth * fraction);
+    const columnLefts = columnWidths.reduce((positions, width, index) => {
+        positions.push(index === 0 ? horizontalPadding : positions[index - 1] + columnWidths[index - 1]);
+        return positions;
     }, []);
-    const textColor = sectionStyles?.color || '#000000';
-    const borderColor = sectionStyles?.borderColor || '#000000';
-    const backgroundColor = sectionStyles?.backgroundColor || '#ffffff';
-    const mutedColor = '#666666';
+    const tableRight = pageWidth - horizontalPadding;
+    const themeColors = resolveThemeColors();
+    const backgroundColor = themeColors.backgroundColor || '#ffffff';
+    const textColor = themeColors.textColor || '#000000';
+    const borderColor = themeColors.borderColor || textColor;
+    const gridColor = textColor;
+    const fieldBackgroundColor = itemInputStyles.backgroundColor || backgroundColor;
+    const drawFieldBox = (x, top, width, height) => {
+        context.fillStyle = fieldBackgroundColor;
+        context.fillRect(x, top, width, height);
+        context.strokeStyle = borderColor;
+        context.strokeRect(x + 0.5, top + 0.5, width - 1, height - 1);
+    };
 
-    canvas.width = pageWidth;
-    canvas.height = pageHeight;
-
-    console.log('Rendering invoice section to blob.', {
-        type,
-        width: pageWidth,
-        height: pageHeight,
-        rowCount: rows.length
-    });
+    const pixelRatio = window.devicePixelRatio || 1;
+    canvas.width = Math.round(pageWidth * pixelRatio);
+    canvas.height = Math.round(pageHeight * pixelRatio);
+    context.scale(pixelRatio, pixelRatio);
 
     context.fillStyle = backgroundColor;
-    context.fillRect(0, 0, pageWidth, pageHeight);
+    context.fillRect(0, 0, canvas.width, canvas.height);
     context.strokeStyle = borderColor;
     context.lineWidth = 1;
-    context.strokeRect(0.5, 0.5, pageWidth - 1, pageHeight - 1);
+    context.strokeRect(0.5, 0.5, canvas.width - 1, canvas.height - 1);
 
-    let y = padding;
+    let y = sectionPadding;
+    const customerName = formState.customerName.trim();
 
     context.fillStyle = textColor;
-    context.font = '700 24px Arial';
-    context.textAlign = 'center';
     context.textBaseline = 'middle';
+    context.textAlign = 'center';
+    context.font = headingStyles.font;
     context.fillText(messages.heading, pageWidth / 2, y + titleHeight / 2);
-    y += titleHeight;
+    y += titleHeight + sectionGap;
 
-    context.font = '16px Arial';
+    context.font = itemInputStyles.font;
     context.textAlign = 'left';
-    context.fillText((formState.customerName || messages.customerNamePlaceholder).toUpperCase(), padding, y + metaHeight / 2);
+    if (customerName) {
+        context.fillText(
+            customerName.toUpperCase(),
+            horizontalPadding + fieldHorizontalPadding,
+            y + metaHeight / 2
+        );
+    }
     context.textAlign = 'right';
-    context.fillText(formState.orderDate || '', pageWidth - padding, y + metaHeight / 2);
-    y += metaHeight;
+    context.fillText(formatDate(formState.orderDate), tableRight - fieldHorizontalPadding, y + metaHeight / 2);
+    y += metaHeight + sectionGap;
 
-    context.beginPath();
-    context.moveTo(padding, y);
-    context.lineTo(pageWidth - padding, y);
-    context.stroke();
-
-    context.font = '700 14px Arial';
+    context.font = `700 ${itemInputStyles.fontSize} ${itemInputStyles.fontFamily}`;
     context.fillStyle = textColor;
     context.textAlign = 'left';
-    context.fillText(messages.itemLabel, columnOffsets[0] + 8, y + headerHeight / 2);
+    context.fillText(messages.itemLabel, columnLefts[0] + headerHorizontalPadding, y + headerHeight / 2);
     context.textAlign = 'right';
-    context.fillText(messages.qtyLabel, columnOffsets[1] + columnWidths[1] - 8, y + headerHeight / 2);
-    context.fillText(messages.priceLabel, columnOffsets[2] + columnWidths[2] - 8, y + headerHeight / 2);
-    context.fillText(messages.sumLabel, columnOffsets[3] + columnWidths[3] - 8, y + headerHeight / 2);
+    context.fillText(messages.qtyLabel, columnLefts[1] + columnWidths[1] - headerHorizontalPadding, y + headerHeight / 2);
+    context.fillText(messages.priceLabel, columnLefts[2] + columnWidths[2] - headerHorizontalPadding, y + headerHeight / 2);
+    context.fillText(messages.sumLabel, columnLefts[3] + columnWidths[3] - headerHorizontalPadding, y + headerHeight / 2);
     y += headerHeight;
 
+    context.strokeStyle = gridColor;
     context.beginPath();
-    context.moveTo(padding, y);
-    context.lineTo(pageWidth - padding, y);
+    context.moveTo(horizontalPadding, y + 0.5);
+    context.lineTo(tableRight, y + 0.5);
     context.stroke();
 
-    context.font = '14px Arial';
-    rows.concat(rows.length ? [] : [{ item: '', qty: '1', price: '0' }]).forEach((row) => {
+    const renderRows = rows.length ? rows : [{ item: '', qty: '1', price: '0' }];
+    context.font = itemInputStyles.font;
+
+    renderRows.forEach((row) => {
         const quantity = Number(row.qty || 0);
         const price = Number(row.price || 0);
         const subtotal = quantity * price;
+        const cellTop = y;
+
+        columnWidths.forEach((width, index) => {
+            drawFieldBox(columnLefts[index], cellTop, width, rowHeight);
+        });
 
         context.fillStyle = textColor;
         context.textAlign = 'left';
-        context.fillText((row.item || '').toUpperCase(), columnOffsets[0] + 8, y + rowHeight / 2);
-        context.textAlign = 'right';
-        context.fillText(formatNumber(quantity), columnOffsets[1] + columnWidths[1] - 8, y + rowHeight / 2);
-        context.fillText(formatNumber(price), columnOffsets[2] + columnWidths[2] - 8, y + rowHeight / 2);
-        context.fillText(formatNumber(subtotal), columnOffsets[3] + columnWidths[3] - 8, y + rowHeight / 2);
+        context.fillText((row.item || '').toUpperCase(), columnLefts[0] + 8, cellTop + rowHeight / 2);
 
-        context.strokeStyle = mutedColor;
+        context.textAlign = 'right';
+        context.fillText(formatNumber(quantity), columnLefts[1] + columnWidths[1] - 8, cellTop + rowHeight / 2);
+        context.fillText(formatNumber(price), columnLefts[2] + columnWidths[2] - 8, cellTop + rowHeight / 2);
+        context.fillText(formatNumber(subtotal), columnLefts[3] + columnWidths[3] - 8, cellTop + rowHeight / 2);
+
         context.beginPath();
-        context.moveTo(padding, y + rowHeight);
-        context.lineTo(pageWidth - padding, y + rowHeight);
+        context.moveTo(horizontalPadding, y + rowHeight + 0.5);
+        context.lineTo(tableRight, y + rowHeight + 0.5);
         context.stroke();
 
         y += rowHeight;
     });
 
-    const total = rows.reduce((sum, row) => sum + Number(row.qty || 0) * Number(row.price || 0), 0);
-    context.font = '700 16px Arial';
+    const total = renderRows.reduce((sum, row) => sum + Number(row.qty || 0) * Number(row.price || 0), 0);
+    context.font = `700 ${totalOutputStyles.fontSize} ${totalOutputStyles.fontFamily}`;
     context.fillStyle = textColor;
     context.textAlign = 'right';
-    context.fillText(messages.totalLabel, columnOffsets[2] + columnWidths[2] - 8, y + totalHeight / 2);
-    context.fillText(formatNumber(total), columnOffsets[3] + columnWidths[3] - 8, y + totalHeight / 2);
+    context.fillText(messages.totalLabel, columnLefts[2] + columnWidths[2] - 8, y + totalHeight / 2);
+    drawFieldBox(columnLefts[3], y, columnWidths[3], totalHeight);
+    context.fillStyle = textColor;
+    context.fillText(formatNumber(total), columnLefts[3] + columnWidths[3] - 8, y + totalHeight / 2);
 
-    return await new Promise((resolve) => {
-        canvas.toBlob(resolve, type, 0.95);
+    return await new Promise((resolve, reject) => {
+        try {
+            canvas.toBlob((blob) => {
+                if (!blob) {
+                    reject(new Error(`Canvas blob generation returned null for ${type}.`));
+                    return;
+                }
+                resolve(blob);
+            }, type);
+        } catch (error) {
+            reject(error);
+        }
     });
 }
 
@@ -430,30 +527,41 @@ async function copySectionAsImage() {
             alert(messages.copyRenderFailed);
             return;
         }
-        console.log('Invoice blob rendered successfully.', { format, mimeType, size: blob.size });
-    } catch {
-        console.error('Invoice render failed.', { format, mimeType });
+    } catch (error) {
+        console.error('Invoice render failed.', {
+            error,
+            format,
+            mimeType,
+            customerName: customerNameInput?.value ?? '',
+            orderDate: orderDate?.value ?? '',
+            rowCount: getItemRows().length
+        });
         alert(messages.copyRenderFailed);
         return;
     }
 
     if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
-        console.warn('Clipboard image write unsupported, falling back to download.', { format, mimeType });
+        console.error('Clipboard image write unsupported, falling back to download.', { format, mimeType });
         downloadBlob(blob, extension);
         alert(messages.copyUnsupported);
         return;
     }
 
     try {
-        console.log('Attempting clipboard image write.', { format, mimeType, size: blob.size });
         await navigator.clipboard.write([
             new ClipboardItem({ [mimeType]: blob })
         ]);
 
-        console.log('Clipboard image write succeeded.', { format, mimeType });
         alert(messages.copySuccess);
-    } catch {
-        console.error('Clipboard image write failed, falling back to download.', { format, mimeType });
+    } catch (error) {
+        console.error('Clipboard image write failed, falling back to download.', {
+            error,
+            format,
+            mimeType,
+            blobSize: blob.size,
+            clipboardWriteAvailable: !!navigator.clipboard?.write,
+            clipboardItemAvailable: typeof ClipboardItem !== 'undefined'
+        });
         downloadBlob(blob, extension);
         alert(`${messages.copyFailed}\n${messages.copyDownloadSuccess}`);
     }
@@ -521,6 +629,14 @@ let lastFocusedInputId = null;
 const getActiveInput = () => document.getElementById(lastFocusedInputId);
 const sanitizeNumberInput = (value) => String(value ?? '').replace(/[^\d]/g, '');
 const formatNumber = (value) => numberFormatter.format(Number(value) || 0);
+const formatDate = (value) => {
+    if (!value) return '';
+
+    const [year, month, day] = String(value).split('-');
+    if (!year || !month || !day) return value;
+
+    return `${day}/${month}/${year}`;
+};
 const isFormattedNumberInput = (input) =>
     input instanceof HTMLInputElement && /^(qty|price)-/.test(input.id);
 const getNumberValue = (input) => Number(sanitizeNumberInput(input?.value)) || 0;

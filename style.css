@@ -90,7 +90,6 @@ input, output {
 
 output {
     display: block;
-    padding-right: 1em;
 }
 
 .data-text {
