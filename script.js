@@ -16,6 +16,10 @@ const TRANSLATIONS = {
         copyUnavailable: 'unsupported',
         copyError: 'failed',
         copyDisabled: 'copy unavailable for ',
+        languageButton: 'lang: ',
+        languageAuto: 'auto',
+        languageEn: 'en',
+        languageId: 'id',
         themeButton: 'theme: ',
         themeAuto: 'auto',
         themeLight: 'light',
@@ -49,6 +53,10 @@ const TRANSLATIONS = {
         copyUnavailable: 'tidak didukung',
         copyError: 'gagal',
         copyDisabled: 'salin tidak tersedia untuk ',
+        languageButton: 'bahasa: ',
+        languageAuto: 'otomatis',
+        languageEn: 'en',
+        languageId: 'id',
         themeButton: 'tema: ',
         themeAuto: 'otomatis',
         themeLight: 'terang',
@@ -69,9 +77,15 @@ const TRANSLATIONS = {
 
 const browserLanguage = navigator.language.toLowerCase();
 const languageCode = browserLanguage.split('-')[0];
-const locale = browserLanguage in TRANSLATIONS ? browserLanguage : languageCode in TRANSLATIONS ? languageCode : 'en';
-const messages = TRANSLATIONS[locale];
-const numberFormatter = new Intl.NumberFormat(locale);
+const LANGUAGE_STORAGE_KEY = 'invoice-language';
+const LANGUAGE_MODES = ['auto', 'en', 'id'];
+const resolveLocale = (mode) => {
+    if (mode === 'en' || mode === 'id') return mode;
+    return browserLanguage in TRANSLATIONS ? browserLanguage : languageCode in TRANSLATIONS ? languageCode : 'en';
+};
+let locale = resolveLocale('auto');
+let messages = TRANSLATIONS[locale];
+let numberFormatter = new Intl.NumberFormat(locale);
 const STORAGE_KEY = 'invoice-form-data';
 const THEME_STORAGE_KEY = 'invoice-theme';
 const COPY_FORMAT_STORAGE_KEY = 'invoice-copy-format';
@@ -210,6 +224,7 @@ function createAppShell() {
         ],
         [
             { id: 'format', translationKey: 'formatButton' },
+            { id: 'language', translationKey: 'languageButton' },
             { id: 'theme', translationKey: 'themeButton' }
         ]
     ];
@@ -278,6 +293,7 @@ const openButton = document.getElementById('open');
 const saveButton = document.getElementById('save');
 const copyButton = document.getElementById('copy');
 const formatButton = document.getElementById('format');
+const languageButton = document.getElementById('language');
 const themeButton = document.getElementById('theme');
 const colorSchemeMeta = document.querySelector('meta[name="color-scheme"]');
 let activeConfirmationButton = null;
@@ -293,39 +309,71 @@ const openFileInput = createElement('input', {
 
 document.body.append(openFileInput);
 
-document.documentElement.lang = locale;
+function updateLanguageButton(mode) {
+    if (!languageButton) return;
 
-document.querySelectorAll('[data-i18n]').forEach((element) => {
-    const key = element.dataset.i18n;
-    const message = messages[key];
-    if (!message) return;
+    const modeLabel = messages[`language${mode[0].toUpperCase()}${mode.slice(1)}`] ?? mode;
+    languageButton.textContent = `${messages.languageButton}${modeLabel}`;
+}
 
-    element.textContent = message;
+function applyTranslations() {
+    document.documentElement.lang = locale;
 
-    if (element.tagName === 'TITLE') {
-        document.title = message;
+    document.querySelectorAll('[data-i18n]').forEach((element) => {
+        const key = element.dataset.i18n;
+        const message = messages[key];
+        if (!message) return;
+
+        element.textContent = message;
+
+        if (element.tagName === 'TITLE') {
+            document.title = message;
+        }
+    });
+
+    document.querySelectorAll('[data-i18n-placeholder]').forEach((element) => {
+        const key = element.dataset.i18nPlaceholder;
+        const message = messages[key];
+        if (!message) return;
+
+        element.placeholder = message;
+    });
+
+    document.querySelectorAll('[data-i18n-title]').forEach((element) => {
+        const key = element.dataset.i18nTitle;
+        const message = messages[key];
+
+        if (!message) {
+            element.removeAttribute('title');
+            return;
+        }
+
+        element.title = message;
+    });
+
+    document.querySelectorAll('#invoice-table thead th[data-header-key]').forEach((element) => {
+        const key = element.dataset.headerKey;
+        const message = messages[key];
+        if (message) {
+            element.textContent = message;
+        }
+    });
+
+    document.querySelectorAll('#invoice-table tbody tr td input[id^=\"item-\"]').forEach((element) => {
+        element.placeholder = messages.itemNamePlaceholder;
+    });
+
+    const totalLabel = document.querySelector('#invoice-table tbody tr th[data-total-label]');
+    if (totalLabel) {
+        totalLabel.textContent = messages.totalLabel;
     }
-});
 
-document.querySelectorAll('[data-i18n-placeholder]').forEach((element) => {
-    const key = element.dataset.i18nPlaceholder;
-    const message = messages[key];
-    if (!message) return;
+    updateFormatButton(localStorage.getItem(COPY_FORMAT_STORAGE_KEY) || COPY_FORMATS[0]);
+    updateLanguageButton(localStorage.getItem(LANGUAGE_STORAGE_KEY) || 'auto');
+    updateThemeButton(localStorage.getItem(THEME_STORAGE_KEY) || 'auto');
+}
 
-    element.placeholder = message;
-});
-
-document.querySelectorAll('[data-i18n-title]').forEach((element) => {
-    const key = element.dataset.i18nTitle;
-    const message = messages[key];
-
-    if (!message) {
-        element.removeAttribute('title');
-        return;
-    }
-
-    element.title = message;
-});
+applyTranslations();
 
 function updateThemeButton(mode) {
     if (!themeButton) return;
@@ -475,6 +523,26 @@ function toggleTheme() {
 }
 
 themeButton?.addEventListener('click', toggleTheme);
+
+function setLanguage(mode) {
+    const nextLanguage = LANGUAGE_MODES.includes(mode) ? mode : 'auto';
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
+    locale = resolveLocale(nextLanguage);
+    messages = TRANSLATIONS[locale];
+    numberFormatter = new Intl.NumberFormat(locale);
+    applyTranslations();
+    updateInvoiceTotal();
+}
+
+function toggleLanguage() {
+    const currentLanguage = localStorage.getItem(LANGUAGE_STORAGE_KEY) || 'auto';
+    const currentIndex = LANGUAGE_MODES.indexOf(currentLanguage);
+    const nextLanguage = LANGUAGE_MODES[(currentIndex + 1) % LANGUAGE_MODES.length];
+
+    setLanguage(nextLanguage);
+}
+
+languageButton?.addEventListener('click', toggleLanguage);
 
 function setCopyFormat(format) {
     const nextFormat = COPY_FORMATS.includes(format) ? format : COPY_FORMATS[0];
@@ -1106,6 +1174,7 @@ function createHeaderRow() {
     TABLE_HEADER_FIELDS.forEach((field) => {
         const cell = createTextCell('th', messages[field.key], field.className);
         cell.scope = 'col';
+        cell.dataset.headerKey = field.key;
         row.append(cell);
     });
 
@@ -1119,6 +1188,7 @@ function createTotalRow() {
     const totalOutput = document.createElement('output');
 
     labelCell.colSpan = 3;
+    labelCell.dataset.totalLabel = 'true';
     totalOutput.name = 'total';
     totalOutput.id = 'total';
     totalOutput.className = 'data-number';
@@ -1300,6 +1370,7 @@ function getOrAppendNextRow(row) {
 }
 
 initializeInvoiceTable();
+setLanguage(localStorage.getItem(LANGUAGE_STORAGE_KEY) || 'auto');
 setCopyFormat(localStorage.getItem(COPY_FORMAT_STORAGE_KEY) || COPY_FORMATS[0]);
 setTheme(localStorage.getItem(THEME_STORAGE_KEY) || 'auto');
 restoreFormState(loadFormState());
