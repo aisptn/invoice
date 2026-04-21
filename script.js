@@ -5,7 +5,8 @@ const TRANSLATIONS = {
         saveSuccess: 'saved!',
         saveRenderFailed: 'Could not render the invoice for saving.',
         clearButton: 'clear',
-        clearConfirmation: 'Are you sure you want to clear the form? This action cannot be undone.',
+        clearPrompt: 'clear?',
+        clearSuccess: 'cleared!',
         formatButton: 'format: ',
         formatPng: 'png',
         copyButton: 'copy',
@@ -32,7 +33,8 @@ const TRANSLATIONS = {
     id: {
         openButton: 'buka',
         clearButton: 'hapus',
-        clearConfirmation: 'Yakin ingin menghapus formulir? Tindakan ini tidak dapat dibatalkan.',
+        clearPrompt: 'hapus?',
+        clearSuccess: 'terhapus!',
         saveButton: 'simpan',
         saveSuccess: 'tersimpan!',
         saveRenderFailed: 'Gagal membentuk invoice untuk disimpan.',
@@ -268,14 +270,74 @@ function updateFormatButton(format) {
     formatButton.textContent = `${messages.formatButton}${formatLabel}`;
 }
 
+function getButtonDefaultLabel(button) {
+    if (!(button instanceof HTMLButtonElement)) return '';
+
+    const translationKey = button.dataset.i18n;
+    return translationKey ? messages[translationKey] ?? button.textContent : button.textContent;
+}
+
+function clearButtonState(button) {
+    if (!(button instanceof HTMLButtonElement)) return;
+
+    if (button._feedbackTimeoutId) {
+        clearTimeout(button._feedbackTimeoutId);
+        button._feedbackTimeoutId = null;
+    }
+
+    if (button._temporaryStateTimeoutId) {
+        clearTimeout(button._temporaryStateTimeoutId);
+        button._temporaryStateTimeoutId = null;
+    }
+
+    if (button._temporaryStateEnableTimeoutId) {
+        clearTimeout(button._temporaryStateEnableTimeoutId);
+        button._temporaryStateEnableTimeoutId = null;
+    }
+
+    button.dataset.confirming = 'false';
+    button.textContent = getButtonDefaultLabel(button);
+    button.disabled = false;
+}
+
+function setTemporaryButtonState(button, message, { duration = 3000, enableDelay = 0, confirming = false } = {}) {
+    if (!(button instanceof HTMLButtonElement)) return;
+
+    clearButtonState(button);
+    button.dataset.confirming = confirming ? 'true' : 'false';
+    button.disabled = true;
+    button.textContent = message;
+
+    if (enableDelay > 0) {
+        button._temporaryStateEnableTimeoutId = window.setTimeout(() => {
+            button.disabled = false;
+            button._temporaryStateEnableTimeoutId = null;
+        }, enableDelay);
+    }
+
+    button._temporaryStateTimeoutId = window.setTimeout(() => {
+        clearButtonState(button);
+    }, duration);
+}
+
 clearButton.addEventListener('click', () => {
-    if (!confirm(messages.clearConfirmation)) {
+    if (!(clearButton instanceof HTMLButtonElement) || clearButton.disabled) {
+        return;
+    }
+
+    if (clearButton.dataset.confirming !== 'true') {
+        setTemporaryButtonState(clearButton, messages.clearPrompt, {
+            duration: 3000,
+            enableDelay: 300,
+            confirming: true
+        });
         return;
     }
 
     localStorage.removeItem(STORAGE_KEY);
     restoreFormState(null);
     updateInvoiceTotal();
+    setButtonFeedback(clearButton, messages.clearSuccess);
 });
 
 function setTheme(mode) {
@@ -570,19 +632,11 @@ function downloadBlob(blob, extension) {
 function setButtonFeedback(button, message, duration = 3000) {
     if (!(button instanceof HTMLButtonElement)) return;
 
-    if (button._feedbackTimeoutId) {
-        clearTimeout(button._feedbackTimeoutId);
-    }
-
-    const translationKey = button.dataset.i18n;
-    const defaultLabel = translationKey ? messages[translationKey] ?? button.textContent : button.textContent;
-
+    clearButtonState(button);
     button.disabled = true;
     button.textContent = message;
     button._feedbackTimeoutId = window.setTimeout(() => {
-        button.textContent = defaultLabel;
-        button.disabled = false;
-        button._feedbackTimeoutId = null;
+        clearButtonState(button);
     }, duration);
 }
 
