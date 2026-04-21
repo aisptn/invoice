@@ -23,6 +23,7 @@ const TRANSLATIONS = {
 
         documentTitle: 'Invoice',
         heading: 'Invoice',
+        headingTooltip: '',
         customerNamePlaceholder: 'Name',
         itemLabel: 'Item',
         qtyLabel: 'Qty',
@@ -55,6 +56,7 @@ const TRANSLATIONS = {
 
         documentTitle: 'Invoice',
         heading: 'Invoice',
+        headingTooltip: 'terjemahan: faktur',
         customerNamePlaceholder: 'Nama',
         itemLabel: 'Barang',
         qtyLabel: 'Jumlah',
@@ -241,7 +243,7 @@ function createAppShell() {
             createElement('section', {
                 children: [
                     createElement('h1', {
-                        dataset: { i18n: 'heading' },
+                        dataset: { i18n: 'heading', i18nTitle: 'headingTooltip' },
                         textContent: TRANSLATIONS.en.heading
                     }),
                     createElement('form', {
@@ -311,6 +313,18 @@ document.querySelectorAll('[data-i18n-placeholder]').forEach((element) => {
     if (!message) return;
 
     element.placeholder = message;
+});
+
+document.querySelectorAll('[data-i18n-title]').forEach((element) => {
+    const key = element.dataset.i18nTitle;
+    const message = messages[key];
+
+    if (!message) {
+        element.removeAttribute('title');
+        return;
+    }
+
+    element.title = message;
 });
 
 function updateThemeButton(mode) {
