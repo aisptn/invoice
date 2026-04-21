@@ -524,6 +524,17 @@ function toggleTheme() {
 
 themeButton?.addEventListener('click', toggleTheme);
 
+function refreshFormattedNumberInputs() {
+    getItemRows().forEach((row) => {
+        ['qty', 'price'].forEach((key) => {
+            const input = getRowField(row, key);
+            if (!(input instanceof HTMLInputElement)) return;
+
+            input.value = formatNumber(sanitizeNumberInput(input.value));
+        });
+    });
+}
+
 function setLanguage(mode) {
     const nextLanguage = LANGUAGE_MODES.includes(mode) ? mode : 'auto';
     localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
@@ -531,6 +542,7 @@ function setLanguage(mode) {
     messages = TRANSLATIONS[locale];
     numberFormatter = new Intl.NumberFormat(locale);
     applyTranslations();
+    refreshFormattedNumberInputs();
     updateInvoiceTotal();
 }
 
