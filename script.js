@@ -1,6 +1,7 @@
 const TRANSLATIONS = {
     en: {
         openButton: 'open',
+        openSuccess: 'opened!',
         saveButton: 'save',
         saveSuccess: 'saved!',
         saveRenderFailed: 'Could not render the invoice for saving.',
@@ -8,13 +9,14 @@ const TRANSLATIONS = {
         clearPrompt: 'clear?',
         clearSuccess: 'cleared!',
         formatButton: 'format: ',
+        formatJson: 'json',
         formatPng: 'png',
         copyButton: 'copy',
         copySuccess: 'copied!',
-        copyUnsupported: 'Copy as PNG is not supported in this browser. Downloading instead.',
+        copyUnsupported: 'Copy is not supported in this browser. Downloading instead.',
         copyFailed: 'Copy failed. Downloading instead.',
-        copyRenderFailed: 'Could not render the invoice as a PNG image.',
-        copyDownloadSuccess: 'Clipboard copy was unavailable, so the PNG was downloaded instead.',
+        copyRenderFailed: 'Could not render the invoice for copying.',
+        copyDownloadSuccess: 'Clipboard copy was unavailable, so the file was downloaded instead.',
         themeButton: 'theme: ',
         themeAuto: 'auto',
         themeLight: 'light',
@@ -32,6 +34,7 @@ const TRANSLATIONS = {
     },
     id: {
         openButton: 'buka',
+        openSuccess: 'terbuka!',
         clearButton: 'hapus',
         clearPrompt: 'hapus?',
         clearSuccess: 'terhapus!',
@@ -39,13 +42,14 @@ const TRANSLATIONS = {
         saveSuccess: 'tersimpan!',
         saveRenderFailed: 'Gagal membentuk invoice untuk disimpan.',
         formatButton: 'format: ',
+        formatJson: 'json',
         formatPng: 'png',
         copyButton: 'salin',
         copySuccess: 'tersalin!',
-        copyUnsupported: 'Salin sebagai PNG tidak didukung di peramban ini. Mengunduh sebagai gantinya.',
+        copyUnsupported: 'Salin tidak didukung di peramban ini. Mengunduh sebagai gantinya.',
         copyFailed: 'Gagal menyalin. Mengunduh sebagai gantinya.',
-        copyRenderFailed: 'Tidak dapat membentuk invoice sebagai gambar PNG.',
-        copyDownloadSuccess: 'Salin ke papan klip tidak tersedia, jadi PNG diunduh sebagai gantinya.',
+        copyRenderFailed: 'Tidak dapat membentuk invoice untuk disalin.',
+        copyDownloadSuccess: 'Salin ke papan klip tidak tersedia, jadi file diunduh sebagai gantinya.',
         themeButton: 'tema: ',
         themeAuto: 'otomatis',
         themeLight: 'terang',
@@ -77,7 +81,7 @@ const THEME_META_CONTENT = {
     light: 'light',
     dark: 'dark'
 };
-const COPY_FORMATS = ['png'];
+const COPY_FORMATS = ['png', 'json'];
 
 function createElement(tagName, options = {}) {
     const element = document.createElement(tagName);
@@ -158,7 +162,7 @@ function createAppShell() {
     const toolbarGroups = [
         [
             { id: 'clear', translationKey: 'clearButton' },
-            { id: 'open', translationKey: 'openButton', disabled: true },
+            { id: 'open', translationKey: 'openButton' },
             { id: 'save', translationKey: 'saveButton' },
             { id: 'copy', translationKey: 'copyButton' }
         ],
@@ -228,11 +232,23 @@ function createAppShell() {
 createAppShell();
 
 const clearButton = document.getElementById('clear');
+const openButton = document.getElementById('open');
 const saveButton = document.getElementById('save');
 const copyButton = document.getElementById('copy');
 const formatButton = document.getElementById('format');
 const themeButton = document.getElementById('theme');
 const colorSchemeMeta = document.querySelector('meta[name="color-scheme"]');
+const openFileInput = createElement('input', {
+    attributes: {
+        type: 'file',
+        accept: 'application/json,.json'
+    },
+    properties: {
+        hidden: true
+    }
+});
+
+document.body.append(openFileInput);
 
 document.documentElement.lang = locale;
 
@@ -629,6 +645,11 @@ function downloadBlob(blob, extension) {
     setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 }
 
+function downloadText(content, extension, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    downloadBlob(blob, extension);
+}
+
 function setButtonFeedback(button, message, duration = 3000) {
     if (!(button instanceof HTMLButtonElement)) return;
 
@@ -640,13 +661,10 @@ function setButtonFeedback(button, message, duration = 3000) {
     }, duration);
 }
 
-async function handleImageAction(action) {
+async function handleSaveAction() {
     const format = localStorage.getItem(COPY_FORMAT_STORAGE_KEY) || COPY_FORMATS[0];
-    const mimeType = `image/${format}`;
-    const extension = format;
-    const isCopyAction = action === 'copy';
-    const button = isCopyAction ? copyButton : saveButton;
-    const successMessage = isCopyAction ? messages.copySuccess : messages.saveSuccess;
+    const button = saveButton;
+    const successMessage = messages.saveSuccess;
 
     if (!(button instanceof HTMLButtonElement) || button.disabled) {
         return;
@@ -654,21 +672,29 @@ async function handleImageAction(action) {
 
     button.disabled = true;
 
+    if (format === 'json') {
+        downloadText(JSON.stringify(collectFormState(), null, 2), 'json', 'application/json');
+        setButtonFeedback(button, successMessage);
+        return;
+    }
+
+    const mimeType = `image/${format}`;
+    const extension = format;
+
     let blob;
 
     try {
         blob = await renderSectionToBlob(mimeType);
         if (!blob) {
-            console.error(`Invoice render returned no blob for ${action}.`, { format, mimeType, action });
+            console.error('Invoice render returned no blob for save.', { format, mimeType });
             button.disabled = false;
             return;
         }
     } catch (error) {
-        console.error(`Invoice render failed for ${action}.`, {
+        console.error('Invoice render failed for save.', {
             error,
             format,
             mimeType,
-            action,
             customerName: customerNameInput?.value ?? '',
             orderDate: orderDate?.value ?? '',
             rowCount: getItemRows().length
@@ -677,39 +703,128 @@ async function handleImageAction(action) {
         return;
     }
 
-    if (!isCopyAction) {
-        downloadBlob(blob, extension);
-    } else if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
-        console.error('Clipboard image write unsupported, falling back to download.', { format, mimeType, action });
-        downloadBlob(blob, extension);
-    } else {
-        try {
-            await navigator.clipboard.write([
-                new ClipboardItem({ [mimeType]: blob })
-            ]);
-        } catch (error) {
-            console.error('Clipboard image write failed, falling back to download.', {
-                error,
-                format,
-                mimeType,
-                action,
-                blobSize: blob.size,
-                clipboardWriteAvailable: !!navigator.clipboard?.write,
-                clipboardItemAvailable: typeof ClipboardItem !== 'undefined'
-            });
-            downloadBlob(blob, extension);
-        }
-    }
+    downloadBlob(blob, extension);
 
     setButtonFeedback(button, successMessage);
 }
 
+async function handleCopyAction() {
+    const format = localStorage.getItem(COPY_FORMAT_STORAGE_KEY) || COPY_FORMATS[0];
+    const button = copyButton;
+
+    if (!(button instanceof HTMLButtonElement) || button.disabled) {
+        return;
+    }
+
+    button.disabled = true;
+
+    if (format === 'json') {
+        const jsonContent = JSON.stringify(collectFormState(), null, 2);
+
+        if (!navigator.clipboard?.writeText) {
+            console.error('Clipboard text write unsupported, falling back to download.', { format });
+            downloadText(jsonContent, 'json', 'application/json');
+            setButtonFeedback(button, messages.copySuccess);
+            return;
+        }
+
+        try {
+            await navigator.clipboard.writeText(jsonContent);
+        } catch (error) {
+            console.error('Clipboard text write failed, falling back to download.', {
+                error,
+                format,
+                clipboardWriteTextAvailable: !!navigator.clipboard?.writeText
+            });
+            downloadText(jsonContent, 'json', 'application/json');
+        }
+
+        setButtonFeedback(button, messages.copySuccess);
+        return;
+    }
+
+    const mimeType = `image/${format}`;
+    const extension = format;
+    let blob;
+
+    try {
+        blob = await renderSectionToBlob(mimeType);
+        if (!blob) {
+            console.error('Invoice render returned no blob for copy.', { format, mimeType });
+            button.disabled = false;
+            return;
+        }
+    } catch (error) {
+        console.error('Invoice render failed for copy.', {
+            error,
+            format,
+            mimeType,
+            customerName: customerNameInput?.value ?? '',
+            orderDate: orderDate?.value ?? '',
+            rowCount: getItemRows().length
+        });
+        button.disabled = false;
+        return;
+    }
+
+    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+        console.error('Clipboard image write unsupported, falling back to download.', { format, mimeType });
+        downloadBlob(blob, extension);
+        setButtonFeedback(button, messages.copySuccess);
+        return;
+    }
+
+    try {
+        await navigator.clipboard.write([
+            new ClipboardItem({ [mimeType]: blob })
+        ]);
+    } catch (error) {
+        console.error('Clipboard image write failed, falling back to download.', {
+            error,
+            format,
+            mimeType,
+            blobSize: blob.size,
+            clipboardWriteAvailable: !!navigator.clipboard?.write,
+            clipboardItemAvailable: typeof ClipboardItem !== 'undefined'
+        });
+        downloadBlob(blob, extension);
+    }
+
+    setButtonFeedback(button, messages.copySuccess);
+}
+
+function handleOpenAction() {
+    if (!(openButton instanceof HTMLButtonElement) || openButton.disabled) {
+        return;
+    }
+
+    openFileInput.value = '';
+    openFileInput.click();
+}
+
 formatButton?.addEventListener('click', toggleCopyFormat);
+openButton?.addEventListener('click', handleOpenAction);
 saveButton?.addEventListener('click', () => {
-    void handleImageAction('save');
+    void handleSaveAction();
 });
 copyButton?.addEventListener('click', () => {
-    void handleImageAction('copy');
+    void handleCopyAction();
+});
+
+openFileInput.addEventListener('change', async (event) => {
+    const file = event.target instanceof HTMLInputElement ? event.target.files?.[0] : null;
+    if (!file) return;
+
+    try {
+        const parsed = JSON.parse(await file.text());
+        restoreFormState(parsed);
+        updateInvoiceTotal();
+        saveFormState();
+        setButtonFeedback(openButton, messages.openSuccess);
+    } catch (error) {
+        console.error('Opening invoice JSON failed.', { error, fileName: file.name });
+        clearButtonState(openButton);
+    }
 });
 
 const orderDate = document.getElementById('order-date');
