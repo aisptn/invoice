@@ -2,6 +2,7 @@ const TRANSLATIONS = {
     en: {
         openButton: 'open',
         openSuccess: 'opened!',
+        openPrompt: 'overwrite?',
         saveButton: 'save',
         saveSuccess: 'saved!',
         saveRenderFailed: 'Could not render the invoice for saving.',
@@ -13,6 +14,9 @@ const TRANSLATIONS = {
         formatPng: 'png',
         copyButton: 'copy',
         copySuccess: 'copied!',
+        copyUnavailable: 'unsupported',
+        copyError: 'failed',
+        copyDisabled: 'copy unavailable for ',
         copyUnsupported: 'Copy is not supported in this browser. Downloading instead.',
         copyFailed: 'Copy failed. Downloading instead.',
         copyRenderFailed: 'Could not render the invoice for copying.',
@@ -35,6 +39,7 @@ const TRANSLATIONS = {
     id: {
         openButton: 'buka',
         openSuccess: 'terbuka!',
+        openPrompt: 'timpa?',
         clearButton: 'hapus',
         clearPrompt: 'hapus?',
         clearSuccess: 'terhapus!',
@@ -46,6 +51,9 @@ const TRANSLATIONS = {
         formatPng: 'png',
         copyButton: 'salin',
         copySuccess: 'tersalin!',
+        copyUnavailable: 'tidak didukung',
+        copyError: 'gagal',
+        copyDisabled: 'salin tidak tersedia untuk ',
         copyUnsupported: 'Salin tidak didukung di peramban ini. Mengunduh sebagai gantinya.',
         copyFailed: 'Gagal menyalin. Mengunduh sebagai gantinya.',
         copyRenderFailed: 'Tidak dapat membentuk invoice untuk disalin.',
@@ -82,6 +90,48 @@ const THEME_META_CONTENT = {
     dark: 'dark'
 };
 const COPY_FORMATS = ['png', 'json'];
+const unsupportedCopyFormats = new Set();
+const EMPTY_COPY_DEBUG = {
+    getCause() {
+        return null;
+    },
+    isUnsupported() {
+        return false;
+    }
+};
+
+// Debug copy behavior: removable test-only block for forcing specific copy outcomes.
+globalThis.__INVOICE_COPY_DEBUG__ = (() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const causes = new Set(['unsupported', 'failed', 'render-failed']);
+    const behavior = new Map(
+        (searchParams.get('debugCopy') || searchParams.get('debugCopyUnsupported') || '')
+            .split(',')
+            .map((entry) => entry.trim().toLowerCase())
+            .map((entry) => {
+                const [format, cause = 'unsupported'] = entry.split(':');
+                return [format, cause];
+            })
+            .filter(([format, cause]) => COPY_FORMATS.includes(format) && causes.has(cause))
+    );
+
+    return {
+        getCause(format) {
+            return behavior.get(format) || null;
+        },
+        isUnsupported(format) {
+            return behavior.get(format) === 'unsupported';
+        }
+    };
+})();
+
+function shouldForceUnsupportedCopyFormat(format) {
+    return (globalThis.__INVOICE_COPY_DEBUG__ || EMPTY_COPY_DEBUG).isUnsupported(format);
+}
+
+function getDebugCopyCause(format) {
+    return (globalThis.__INVOICE_COPY_DEBUG__ || EMPTY_COPY_DEBUG).getCause(format);
+}
 
 function createElement(tagName, options = {}) {
     const element = document.createElement(tagName);
@@ -238,6 +288,7 @@ const copyButton = document.getElementById('copy');
 const formatButton = document.getElementById('format');
 const themeButton = document.getElementById('theme');
 const colorSchemeMeta = document.querySelector('meta[name="color-scheme"]');
+let activeConfirmationButton = null;
 const openFileInput = createElement('input', {
     attributes: {
         type: 'file',
@@ -293,6 +344,25 @@ function getButtonDefaultLabel(button) {
     return translationKey ? messages[translationKey] ?? button.textContent : button.textContent;
 }
 
+function getCopyDisabledMessage(format) {
+    const formatLabel = messages[`format${format[0].toUpperCase()}${format.slice(1)}`] ?? format;
+    return `${messages.copyDisabled}${formatLabel}`;
+}
+
+function hasRememberedUnsupportedCopyFormat(format) {
+    return unsupportedCopyFormats.has(format);
+}
+
+function syncCopyButtonAvailability() {
+    if (!(copyButton instanceof HTMLButtonElement)) return;
+
+    const format = localStorage.getItem(COPY_FORMAT_STORAGE_KEY) || COPY_FORMATS[0];
+    const isUnsupported = hasRememberedUnsupportedCopyFormat(format);
+
+    copyButton.title = isUnsupported ? getCopyDisabledMessage(format) : '';
+    copyButton.disabled = isUnsupported;
+}
+
 function clearButtonState(button) {
     if (!(button instanceof HTMLButtonElement)) return;
 
@@ -314,13 +384,28 @@ function clearButtonState(button) {
     button.dataset.confirming = 'false';
     button.textContent = getButtonDefaultLabel(button);
     button.disabled = false;
+
+    if (button === copyButton) {
+        syncCopyButtonAvailability();
+    }
+
+    if (button === activeConfirmationButton) {
+        activeConfirmationButton = null;
+    }
 }
 
 function setTemporaryButtonState(button, message, { duration = 3000, enableDelay = 0, confirming = false } = {}) {
     if (!(button instanceof HTMLButtonElement)) return;
 
+    if (confirming && activeConfirmationButton && activeConfirmationButton !== button) {
+        clearButtonState(activeConfirmationButton);
+    }
+
     clearButtonState(button);
     button.dataset.confirming = confirming ? 'true' : 'false';
+    if (confirming) {
+        activeConfirmationButton = button;
+    }
     button.disabled = true;
     button.textContent = message;
 
@@ -334,6 +419,14 @@ function setTemporaryButtonState(button, message, { duration = 3000, enableDelay
     button._temporaryStateTimeoutId = window.setTimeout(() => {
         clearButtonState(button);
     }, duration);
+}
+
+function hasUnsavedInvoiceData() {
+    const formState = collectFormState();
+    return (
+        formState.customerName.trim() !== '' ||
+        formState.rows.some(hasMeaningfulRowData)
+    );
 }
 
 clearButton.addEventListener('click', () => {
@@ -383,6 +476,7 @@ function setCopyFormat(format) {
     const nextFormat = COPY_FORMATS.includes(format) ? format : COPY_FORMATS[0];
     localStorage.setItem(COPY_FORMAT_STORAGE_KEY, nextFormat);
     updateFormatButton(nextFormat);
+    syncCopyButtonAvailability();
 }
 
 function toggleCopyFormat() {
@@ -711,8 +805,10 @@ async function handleSaveAction() {
 async function handleCopyAction() {
     const format = localStorage.getItem(COPY_FORMAT_STORAGE_KEY) || COPY_FORMATS[0];
     const button = copyButton;
+    const debugCause = getDebugCopyCause(format);
 
-    if (!(button instanceof HTMLButtonElement) || button.disabled) {
+    if (!(button instanceof HTMLButtonElement) || button.disabled || hasRememberedUnsupportedCopyFormat(format)) {
+        syncCopyButtonAvailability();
         return;
     }
 
@@ -721,10 +817,18 @@ async function handleCopyAction() {
     if (format === 'json') {
         const jsonContent = JSON.stringify(collectFormState(), null, 2);
 
-        if (!navigator.clipboard?.writeText) {
-            console.error('Clipboard text write unsupported, falling back to download.', { format });
+        if (debugCause === 'failed') {
+            console.error('Debug forced clipboard text copy failure.', { format, debugCause });
             downloadText(jsonContent, 'json', 'application/json');
-            setButtonFeedback(button, messages.copySuccess);
+            setButtonFeedback(button, messages.copyError);
+            return;
+        }
+
+        if (shouldForceUnsupportedCopyFormat(format) || !navigator.clipboard?.writeText) {
+            console.error('Clipboard text write unsupported, falling back to download.', { format });
+            unsupportedCopyFormats.add(format);
+            downloadText(jsonContent, 'json', 'application/json');
+            setButtonFeedback(button, messages.copyUnavailable);
             return;
         }
 
@@ -737,6 +841,8 @@ async function handleCopyAction() {
                 clipboardWriteTextAvailable: !!navigator.clipboard?.writeText
             });
             downloadText(jsonContent, 'json', 'application/json');
+            setButtonFeedback(button, messages.copyError);
+            return;
         }
 
         setButtonFeedback(button, messages.copySuccess);
@@ -748,10 +854,14 @@ async function handleCopyAction() {
     let blob;
 
     try {
+        if (debugCause === 'render-failed') {
+            throw new Error('Debug forced render failure.');
+        }
+
         blob = await renderSectionToBlob(mimeType);
         if (!blob) {
             console.error('Invoice render returned no blob for copy.', { format, mimeType });
-            button.disabled = false;
+            setButtonFeedback(button, messages.copyError);
             return;
         }
     } catch (error) {
@@ -763,14 +873,22 @@ async function handleCopyAction() {
             orderDate: orderDate?.value ?? '',
             rowCount: getItemRows().length
         });
-        button.disabled = false;
+        setButtonFeedback(button, messages.copyError);
         return;
     }
 
-    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
-        console.error('Clipboard image write unsupported, falling back to download.', { format, mimeType });
+    if (debugCause === 'failed') {
+        console.error('Debug forced clipboard image copy failure.', { format, debugCause });
         downloadBlob(blob, extension);
-        setButtonFeedback(button, messages.copySuccess);
+        setButtonFeedback(button, messages.copyError);
+        return;
+    }
+
+    if (shouldForceUnsupportedCopyFormat(format) || !navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+        console.error('Clipboard image write unsupported, falling back to download.', { format, mimeType });
+        unsupportedCopyFormats.add(format);
+        downloadBlob(blob, extension);
+        setButtonFeedback(button, messages.copyUnavailable);
         return;
     }
 
@@ -788,6 +906,8 @@ async function handleCopyAction() {
             clipboardItemAvailable: typeof ClipboardItem !== 'undefined'
         });
         downloadBlob(blob, extension);
+        setButtonFeedback(button, messages.copyError);
+        return;
     }
 
     setButtonFeedback(button, messages.copySuccess);
@@ -795,6 +915,15 @@ async function handleCopyAction() {
 
 function handleOpenAction() {
     if (!(openButton instanceof HTMLButtonElement) || openButton.disabled) {
+        return;
+    }
+
+    if (openButton.dataset.confirming !== 'true' && hasUnsavedInvoiceData()) {
+        setTemporaryButtonState(openButton, messages.openPrompt, {
+            duration: 3000,
+            enableDelay: 300,
+            confirming: true
+        });
         return;
     }
 
@@ -920,8 +1049,16 @@ const getItemRows = () =>
 const getFirstRowInput = (row) => row?.querySelector('td input');
 const getRowField = (row, key, tagName = 'input') => row?.querySelector(`${tagName}[id^="${key}-"]`);
 const getTotalOutput = () => document.getElementById('total');
-const hasMeaningfulRowData = (rowData) =>
-    !!rowData && [rowData.item, rowData.qty, rowData.price].some((value) => String(value ?? '').trim() !== '');
+const hasMeaningfulRowData = (rowData) => {
+    if (!rowData) return false;
+
+    const item = String(rowData.item ?? '').trim();
+    const qty = String(rowData.qty ?? '').trim();
+    const price = String(rowData.price ?? '').trim();
+
+    const isDefaultEmptyRow = item === '' && (qty === '' || qty === '1') && (price === '' || price === '0');
+    return !isDefaultEmptyRow;
+};
 const createTextCell = (tagName, text, className) => {
     const cell = document.createElement(tagName);
     cell.textContent = text;
@@ -1026,11 +1163,13 @@ function collectFormState() {
     return {
         customerName: customerNameInput?.value ?? '',
         orderDate: orderDate?.value ?? '',
-        rows: getItemRows().map((row) => ({
-            item: getRowField(row, 'item')?.value ?? '',
-            qty: sanitizeNumberInput(getRowField(row, 'qty')?.value),
-            price: sanitizeNumberInput(getRowField(row, 'price')?.value)
-        }))
+        rows: getItemRows()
+            .map((row) => ({
+                item: getRowField(row, 'item')?.value ?? '',
+                qty: sanitizeNumberInput(getRowField(row, 'qty')?.value),
+                price: sanitizeNumberInput(getRowField(row, 'price')?.value)
+            }))
+            .filter(hasMeaningfulRowData)
     };
 }
 
