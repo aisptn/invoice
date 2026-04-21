@@ -315,11 +315,11 @@ async function renderSectionToBlob(type) {
     const rows = formState.rows.filter(hasMeaningfulRowData);
     const section = document.querySelector('main section');
     const sectionStyles = section instanceof HTMLElement ? getComputedStyle(section) : null;
-    const sectionRect = section instanceof HTMLElement ? section.getBoundingClientRect() : null;
     const heading = section?.querySelector('h1');
     const form = section?.querySelector('form');
     const customerFieldset = form?.querySelector('fieldset');
     const table = form?.querySelector('table');
+    const firstHeaderCell = table?.querySelector('th');
     const firstItemRow = getItemRows()[0];
     const firstItemInput = getRowField(firstItemRow, 'item');
     const firstQtyInput = getRowField(firstItemRow, 'qty');
@@ -329,6 +329,7 @@ async function renderSectionToBlob(type) {
     const headingStyles = heading ? getComputedStyle(heading) : rootStyles;
     const fieldsetStyles = customerFieldset ? getComputedStyle(customerFieldset) : rootStyles;
     const tableStyles = table ? getComputedStyle(table) : rootStyles;
+    const headerCellStyles = firstHeaderCell ? getComputedStyle(firstHeaderCell) : tableStyles;
     const itemInputStyles = firstItemInput ? getComputedStyle(firstItemInput) : rootStyles;
     const qtyInputStyles = firstQtyInput ? getComputedStyle(firstQtyInput) : rootStyles;
     const priceInputStyles = firstPriceInput ? getComputedStyle(firstPriceInput) : rootStyles;
@@ -337,7 +338,19 @@ async function renderSectionToBlob(type) {
     const context = canvas.getContext('2d');
     if (!context) return null;
     const parsePixels = (value, fallback = 0) => Number.parseFloat(value) || fallback;
-    const pageWidth = sectionRect?.width || 794;
+    const buildFont = (styles, fallbackWeight = '400') => {
+        const fontStyle = styles?.fontStyle || 'normal';
+        const fontVariant = styles?.fontVariant || 'normal';
+        const fontWeight = styles?.fontWeight || fallbackWeight;
+        const fontSize = styles?.fontSize || '16px';
+        const lineHeight = styles?.lineHeight && styles.lineHeight !== 'normal'
+            ? `/${styles.lineHeight}`
+            : '';
+        const fontFamily = styles?.fontFamily || 'monospace';
+
+        return `${fontStyle} ${fontVariant} ${fontWeight} ${fontSize}${lineHeight} ${fontFamily}`;
+    };
+    const pageWidth = section instanceof HTMLElement ? section.offsetWidth : 794;
     const sectionPadding = parsePixels(sectionStyles?.paddingTop, 40);
     const sectionGap = parsePixels(sectionStyles?.gap, 24);
     const fieldHorizontalPadding = parsePixels(itemInputStyles.paddingLeft, 8);
@@ -349,9 +362,9 @@ async function renderSectionToBlob(type) {
         parsePixels(fieldsetStyles.lineHeight, 32)
     );
     const headerHeight =
-        parsePixels(tableStyles.fontSize, 14) * 1.2 +
-        parsePixels(tableStyles.borderSpacing, 0) +
-        16;
+        parsePixels(headerCellStyles.lineHeight, parsePixels(headerCellStyles.fontSize, 14) * 1.2) +
+        parsePixels(headerCellStyles.paddingTop, 8) +
+        parsePixels(headerCellStyles.paddingBottom, 8);
     const rowHeight = Math.max(
         parsePixels(itemInputStyles.lineHeight, parsePixels(itemInputStyles.fontSize, 14) * 1.2) +
             parsePixels(itemInputStyles.paddingTop, 8) +
@@ -366,8 +379,10 @@ async function renderSectionToBlob(type) {
     );
     const horizontalPadding = parsePixels(sectionStyles?.paddingLeft, sectionPadding);
     const bottomPadding = parsePixels(sectionStyles?.paddingBottom, sectionPadding);
-    const headerHorizontalPadding = 16;
-    const contentRows = Math.max(rows.length, 1);
+    const headerHorizontalPadding = parsePixels(headerCellStyles.paddingLeft, 16);
+    const bodyHorizontalPadding = 8;
+    const renderRows = rows.length ? rows : [];
+    const contentRows = renderRows.length;
     const pageHeight =
         sectionPadding +
         titleHeight +
@@ -376,6 +391,7 @@ async function renderSectionToBlob(type) {
         sectionGap +
         headerHeight +
         contentRows * rowHeight +
+        (contentRows ? 1 : 0) +
         totalHeight +
         bottomPadding;
     const tableWidth = pageWidth - horizontalPadding * 2;
@@ -391,23 +407,48 @@ async function renderSectionToBlob(type) {
     const borderColor = themeColors.borderColor || textColor;
     const gridColor = textColor;
     const fieldBackgroundColor = itemInputStyles.backgroundColor || backgroundColor;
-    const drawFieldBox = (x, top, width, height) => {
-        context.fillStyle = fieldBackgroundColor;
-        context.fillRect(x, top, width, height);
-        context.strokeStyle = borderColor;
-        context.strokeRect(x + 0.5, top + 0.5, width - 1, height - 1);
-    };
-
     const pixelRatio = window.devicePixelRatio || 1;
     canvas.width = Math.round(pageWidth * pixelRatio);
     canvas.height = Math.round(pageHeight * pixelRatio);
     context.scale(pixelRatio, pixelRatio);
 
+    const snapEdge = (value) => Math.round(value * pixelRatio) / pixelRatio;
+    const devicePixel = 1 / pixelRatio;
+    const drawFieldBackground = (x, top, width, height) => {
+        const left = snapEdge(x);
+        const right = snapEdge(x + width);
+        const snappedTop = snapEdge(top);
+        const bottom = snapEdge(top + height);
+
+        context.fillStyle = fieldBackgroundColor;
+        context.fillRect(left, snappedTop, right - left, bottom - snappedTop);
+    };
+    const drawHorizontalLine = (yPosition, startX = horizontalPadding, endX = tableRight) => {
+        const left = snapEdge(startX);
+        const right = snapEdge(endX);
+        const top = snapEdge(yPosition);
+
+        context.fillStyle = gridColor;
+        context.fillRect(left, top, right - left, devicePixel);
+    };
+    const drawVerticalLines = (top, height, boundaries = [horizontalPadding, ...columnLefts.slice(1), tableRight]) => {
+        const snappedTop = snapEdge(top);
+        const snappedBottom = snapEdge(top + height);
+
+        boundaries.forEach((x) => {
+            const left = snapEdge(x);
+            context.fillStyle = gridColor;
+            context.fillRect(left, snappedTop, devicePixel, snappedBottom - snappedTop);
+        });
+    };
+
     context.fillStyle = backgroundColor;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.strokeStyle = borderColor;
-    context.lineWidth = 1;
-    context.strokeRect(0.5, 0.5, canvas.width - 1, canvas.height - 1);
+    context.fillRect(0, 0, pageWidth, pageHeight);
+    context.fillStyle = borderColor;
+    context.fillRect(0, 0, snapEdge(pageWidth), devicePixel);
+    context.fillRect(0, snapEdge(pageHeight) - devicePixel, snapEdge(pageWidth), devicePixel);
+    context.fillRect(0, 0, devicePixel, snapEdge(pageHeight));
+    context.fillRect(snapEdge(pageWidth) - devicePixel, 0, devicePixel, snapEdge(pageHeight));
 
     let y = sectionPadding;
     const customerName = formState.customerName.trim();
@@ -415,11 +456,11 @@ async function renderSectionToBlob(type) {
     context.fillStyle = textColor;
     context.textBaseline = 'middle';
     context.textAlign = 'center';
-    context.font = headingStyles.font;
+    context.font = buildFont(headingStyles, '700');
     context.fillText(messages.heading, pageWidth / 2, y + titleHeight / 2);
     y += titleHeight + sectionGap;
 
-    context.font = itemInputStyles.font;
+    context.font = buildFont(itemInputStyles);
     context.textAlign = 'left';
     if (customerName) {
         context.fillText(
@@ -432,7 +473,7 @@ async function renderSectionToBlob(type) {
     context.fillText(formatDate(formState.orderDate), tableRight - fieldHorizontalPadding, y + metaHeight / 2);
     y += metaHeight + sectionGap;
 
-    context.font = `700 ${itemInputStyles.fontSize} ${itemInputStyles.fontFamily}`;
+    context.font = buildFont(headerCellStyles, '700');
     context.fillStyle = textColor;
     context.textAlign = 'left';
     context.fillText(messages.itemLabel, columnLefts[0] + headerHorizontalPadding, y + headerHeight / 2);
@@ -440,52 +481,60 @@ async function renderSectionToBlob(type) {
     context.fillText(messages.qtyLabel, columnLefts[1] + columnWidths[1] - headerHorizontalPadding, y + headerHeight / 2);
     context.fillText(messages.priceLabel, columnLefts[2] + columnWidths[2] - headerHorizontalPadding, y + headerHeight / 2);
     context.fillText(messages.sumLabel, columnLefts[3] + columnWidths[3] - headerHorizontalPadding, y + headerHeight / 2);
-    y += headerHeight;
+    y = snapEdge(y + headerHeight);
+    const tableBodyTop = y;
 
-    context.strokeStyle = gridColor;
-    context.beginPath();
-    context.moveTo(horizontalPadding, y + 0.5);
-    context.lineTo(tableRight, y + 0.5);
-    context.stroke();
-
-    const renderRows = rows.length ? rows : [{ item: '', qty: '1', price: '0' }];
-    context.font = itemInputStyles.font;
+    context.font = buildFont(itemInputStyles);
 
     renderRows.forEach((row) => {
         const quantity = Number(row.qty || 0);
         const price = Number(row.price || 0);
         const subtotal = quantity * price;
-        const cellTop = y;
+        const cellTop = snapEdge(y);
+        const cellBottom = snapEdge(y + rowHeight);
+        const snappedRowHeight = cellBottom - cellTop;
+        const cellMiddle = cellTop + snappedRowHeight / 2;
 
         columnWidths.forEach((width, index) => {
-            drawFieldBox(columnLefts[index], cellTop, width, rowHeight);
+            drawFieldBackground(columnLefts[index], cellTop, width, snappedRowHeight);
         });
+
+        drawVerticalLines(cellTop, snappedRowHeight);
 
         context.fillStyle = textColor;
         context.textAlign = 'left';
-        context.fillText((row.item || '').toUpperCase(), columnLefts[0] + 8, cellTop + rowHeight / 2);
+        context.fillText((row.item || '').toUpperCase(), columnLefts[0] + bodyHorizontalPadding, cellMiddle);
 
         context.textAlign = 'right';
-        context.fillText(formatNumber(quantity), columnLefts[1] + columnWidths[1] - 8, cellTop + rowHeight / 2);
-        context.fillText(formatNumber(price), columnLefts[2] + columnWidths[2] - 8, cellTop + rowHeight / 2);
-        context.fillText(formatNumber(subtotal), columnLefts[3] + columnWidths[3] - 8, cellTop + rowHeight / 2);
+        context.fillText(formatNumber(quantity), columnLefts[1] + columnWidths[1] - bodyHorizontalPadding, cellMiddle);
+        context.fillText(formatNumber(price), columnLefts[2] + columnWidths[2] - bodyHorizontalPadding, cellMiddle);
+        context.fillText(formatNumber(subtotal), columnLefts[3] + columnWidths[3] - bodyHorizontalPadding, cellMiddle);
 
-        context.beginPath();
-        context.moveTo(horizontalPadding, y + rowHeight + 0.5);
-        context.lineTo(tableRight, y + rowHeight + 0.5);
-        context.stroke();
+        drawHorizontalLine(cellBottom);
 
-        y += rowHeight;
+        y = cellBottom;
     });
 
-    const total = renderRows.reduce((sum, row) => sum + Number(row.qty || 0) * Number(row.price || 0), 0);
-    context.font = `700 ${totalOutputStyles.fontSize} ${totalOutputStyles.fontFamily}`;
+    const total = rows.reduce((sum, row) => sum + Number(row.qty || 0) * Number(row.price || 0), 0);
+    const totalTop = snapEdge(y);
+    const totalBottom = snapEdge(y + totalHeight);
+    const snappedTotalHeight = totalBottom - totalTop;
+    const totalMiddle = totalTop + snappedTotalHeight / 2;
+    context.font = buildFont(totalOutputStyles, '700');
     context.fillStyle = textColor;
     context.textAlign = 'right';
-    context.fillText(messages.totalLabel, columnLefts[2] + columnWidths[2] - 8, y + totalHeight / 2);
-    drawFieldBox(columnLefts[3], y, columnWidths[3], totalHeight);
+    context.fillText(messages.totalLabel, columnLefts[3] - bodyHorizontalPadding, totalMiddle);
+    drawFieldBackground(columnLefts[3], totalTop, columnWidths[3], snappedTotalHeight);
     context.fillStyle = textColor;
-    context.fillText(formatNumber(total), columnLefts[3] + columnWidths[3] - 8, y + totalHeight / 2);
+    context.fillText(formatNumber(total), columnLefts[3] + columnWidths[3] - bodyHorizontalPadding, totalMiddle);
+
+    drawHorizontalLine(tableBodyTop);
+    renderRows.forEach((_, index) => {
+        const rowBottom = snapEdge(tableBodyTop + rowHeight * (index + 1));
+        drawHorizontalLine(rowBottom);
+    });
+    drawVerticalLines(totalTop, snappedTotalHeight, [columnLefts[3], tableRight]);
+    drawHorizontalLine(totalBottom, columnLefts[3], tableRight);
 
     return await new Promise((resolve, reject) => {
         try {

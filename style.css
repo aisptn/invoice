@@ -4,12 +4,19 @@
     --page-space: calc(min(var(--paper-height), var(--paper-width)) * 0.05);
     --paper-safe-width: min(var(--paper-width), calc(100vw - 2rem));
     --paper-scale: min(1, calc(var(--paper-safe-width) / var(--paper-width)));
+    --invoice-font-size: 16px;
+    --invoice-line-height: 1.2;
+    --invoice-heading-size: 3rem;
+    --invoice-table-heading-size: 1rem;
 }
 
 body {
+    background: black;
     display: flex;
+    font-size: var(--invoice-font-size);
     flex-direction: column;
     height: 100vh;
+    line-height: var(--invoice-line-height);
 }
 
 header {
@@ -30,14 +37,15 @@ main {
     align-items: center;
     display: flex;
     flex-direction: column;
-    justify-content: center;
     height: 100%;
+    justify-content: center;
     margin-inline: auto;
     width: var(--paper-width);
     zoom: var(--paper-scale);
 }
 
 section {
+    background: canvas;
     border: 1px solid canvasText;
     display: flex;
     flex-direction: column;
@@ -45,7 +53,12 @@ section {
     padding: var(--page-space);
     width: var(--paper-width);
 
-    h1 { text-align: center; }
+    h1 {
+        font-size: var(--invoice-heading-size);
+        font-weight: 700;
+        line-height: var(--invoice-line-height);
+        text-align: center;
+    }
 }
 
 form {
@@ -66,13 +79,27 @@ table {
     table-layout: fixed;
     width: 100%;
     
-    th { padding: 0.5em 1em; }
-    input, output { border: 1px solid; }
+    th {
+        font-size: var(--invoice-table-heading-size);
+        font-weight: 700;
+        line-height: var(--invoice-line-height);
+        padding: 0.5em 1em;
+    }
+    td {
+        border: 1px solid ;
+
+        input:focus{
+            outline: auto;
+        }
+
+    }
 }
 
 input, output {
     background: canvas;
-    border: 1px solid canvas;
+    border: none;
+    font: inherit;
+    outline: none;
     padding: 0.5em;
     width: 100%;
 
