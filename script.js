@@ -2,12 +2,14 @@ const TRANSLATIONS = {
     en: {
         openButton: 'open',
         saveButton: 'save',
+        saveSuccess: 'saved!',
+        saveRenderFailed: 'Could not render the invoice for saving.',
         clearButton: 'clear',
         clearConfirmation: 'Are you sure you want to clear the form? This action cannot be undone.',
         formatButton: 'format: ',
         formatPng: 'png',
         copyButton: 'copy',
-        copySuccess: 'Copied as PNG.',
+        copySuccess: 'copied!',
         copyUnsupported: 'Copy as PNG is not supported in this browser. Downloading instead.',
         copyFailed: 'Copy failed. Downloading instead.',
         copyRenderFailed: 'Could not render the invoice as a PNG image.',
@@ -32,14 +34,16 @@ const TRANSLATIONS = {
         clearButton: 'hapus',
         clearConfirmation: 'Yakin ingin menghapus formulir? Tindakan ini tidak dapat dibatalkan.',
         saveButton: 'simpan',
+        saveSuccess: 'tersimpan!',
+        saveRenderFailed: 'Gagal membentuk invoice untuk disimpan.',
         formatButton: 'format: ',
         formatPng: 'png',
         copyButton: 'salin',
-        copySuccess: 'Tersalin sebagai PNG.',
-        copyUnsupported: 'Salin sebagai PNG tidak didukung di browser ini. Mengunduh sebagai gantinya.',
+        copySuccess: 'tersalin!',
+        copyUnsupported: 'Salin sebagai PNG tidak didukung di peramban ini. Mengunduh sebagai gantinya.',
         copyFailed: 'Gagal menyalin. Mengunduh sebagai gantinya.',
-        copyRenderFailed: 'Tidak dapat merender invoice sebagai gambar PNG.',
-        copyDownloadSuccess: 'Salin ke clipboard tidak tersedia, jadi PNG diunduh sebagai gantinya.',
+        copyRenderFailed: 'Tidak dapat membentuk invoice sebagai gambar PNG.',
+        copyDownloadSuccess: 'Salin ke papan klip tidak tersedia, jadi PNG diunduh sebagai gantinya.',
         themeButton: 'tema: ',
         themeAuto: 'otomatis',
         themeLight: 'terang',
@@ -153,7 +157,7 @@ function createAppShell() {
         [
             { id: 'clear', translationKey: 'clearButton' },
             { id: 'open', translationKey: 'openButton', disabled: true },
-            { id: 'save', translationKey: 'saveButton', disabled: true },
+            { id: 'save', translationKey: 'saveButton' },
             { id: 'copy', translationKey: 'copyButton' }
         ],
         [
@@ -222,6 +226,7 @@ function createAppShell() {
 createAppShell();
 
 const clearButton = document.getElementById('clear');
+const saveButton = document.getElementById('save');
 const copyButton = document.getElementById('copy');
 const formatButton = document.getElementById('format');
 const themeButton = document.getElementById('theme');
@@ -562,63 +567,95 @@ function downloadBlob(blob, extension) {
     setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 }
 
-async function copySectionAsImage() {
+function setButtonFeedback(button, message, duration = 3000) {
+    if (!(button instanceof HTMLButtonElement)) return;
+
+    if (button._feedbackTimeoutId) {
+        clearTimeout(button._feedbackTimeoutId);
+    }
+
+    const translationKey = button.dataset.i18n;
+    const defaultLabel = translationKey ? messages[translationKey] ?? button.textContent : button.textContent;
+
+    button.disabled = true;
+    button.textContent = message;
+    button._feedbackTimeoutId = window.setTimeout(() => {
+        button.textContent = defaultLabel;
+        button.disabled = false;
+        button._feedbackTimeoutId = null;
+    }, duration);
+}
+
+async function handleImageAction(action) {
     const format = localStorage.getItem(COPY_FORMAT_STORAGE_KEY) || COPY_FORMATS[0];
     const mimeType = `image/${format}`;
     const extension = format;
+    const isCopyAction = action === 'copy';
+    const button = isCopyAction ? copyButton : saveButton;
+    const successMessage = isCopyAction ? messages.copySuccess : messages.saveSuccess;
+
+    if (!(button instanceof HTMLButtonElement) || button.disabled) {
+        return;
+    }
+
+    button.disabled = true;
 
     let blob;
 
     try {
         blob = await renderSectionToBlob(mimeType);
         if (!blob) {
-            console.error('Invoice render returned no blob.', { format, mimeType });
-            alert(messages.copyRenderFailed);
+            console.error(`Invoice render returned no blob for ${action}.`, { format, mimeType, action });
+            button.disabled = false;
             return;
         }
     } catch (error) {
-        console.error('Invoice render failed.', {
+        console.error(`Invoice render failed for ${action}.`, {
             error,
             format,
             mimeType,
+            action,
             customerName: customerNameInput?.value ?? '',
             orderDate: orderDate?.value ?? '',
             rowCount: getItemRows().length
         });
-        alert(messages.copyRenderFailed);
+        button.disabled = false;
         return;
     }
 
-    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
-        console.error('Clipboard image write unsupported, falling back to download.', { format, mimeType });
+    if (!isCopyAction) {
         downloadBlob(blob, extension);
-        alert(messages.copyUnsupported);
-        return;
+    } else if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+        console.error('Clipboard image write unsupported, falling back to download.', { format, mimeType, action });
+        downloadBlob(blob, extension);
+    } else {
+        try {
+            await navigator.clipboard.write([
+                new ClipboardItem({ [mimeType]: blob })
+            ]);
+        } catch (error) {
+            console.error('Clipboard image write failed, falling back to download.', {
+                error,
+                format,
+                mimeType,
+                action,
+                blobSize: blob.size,
+                clipboardWriteAvailable: !!navigator.clipboard?.write,
+                clipboardItemAvailable: typeof ClipboardItem !== 'undefined'
+            });
+            downloadBlob(blob, extension);
+        }
     }
 
-    try {
-        await navigator.clipboard.write([
-            new ClipboardItem({ [mimeType]: blob })
-        ]);
-
-        alert(messages.copySuccess);
-    } catch (error) {
-        console.error('Clipboard image write failed, falling back to download.', {
-            error,
-            format,
-            mimeType,
-            blobSize: blob.size,
-            clipboardWriteAvailable: !!navigator.clipboard?.write,
-            clipboardItemAvailable: typeof ClipboardItem !== 'undefined'
-        });
-        downloadBlob(blob, extension);
-        alert(`${messages.copyFailed}\n${messages.copyDownloadSuccess}`);
-    }
+    setButtonFeedback(button, successMessage);
 }
 
 formatButton?.addEventListener('click', toggleCopyFormat);
+saveButton?.addEventListener('click', () => {
+    void handleImageAction('save');
+});
 copyButton?.addEventListener('click', () => {
-    void copySectionAsImage();
+    void handleImageAction('copy');
 });
 
 const orderDate = document.getElementById('order-date');
