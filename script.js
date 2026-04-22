@@ -1109,6 +1109,11 @@ let invoiceTableBody = null;
 let lastFocusedInputId = null;
 const getActiveInput = () => document.getElementById(lastFocusedInputId);
 const sanitizeNumberInput = (value) => String(value ?? '').replace(/[^\d]/g, '');
+const sanitizeCustomerName = (value, { lowercase = false, uppercase = false } = {}) => {
+    const sanitizedValue = String(value ?? '').replace(/[^A-Za-z\s]/g, '');
+    if (uppercase) return sanitizedValue.toUpperCase();
+    return lowercase ? sanitizedValue.toLowerCase() : sanitizedValue;
+};
 const formatNumber = (value) => numberFormatter.format(Number(value) || 0);
 const formatNumberInputValue = (value) => {
     const sanitizedValue = sanitizeNumberInput(value);
@@ -1274,7 +1279,7 @@ function appendItemRow(rowData = {}) {
 
 function collectFormState() {
     return {
-        customerName: customerNameInput?.value ?? '',
+        customerName: sanitizeCustomerName(customerNameInput?.value, { lowercase: true }),
         orderDate: orderDate?.value ?? '',
         rows: getItemRows()
             .map((row) => ({
@@ -1303,7 +1308,9 @@ function restoreFormState(savedState) {
 
     if (customerNameInput) {
         customerNameInput.value =
-            savedState && typeof savedState.customerName === 'string' ? savedState.customerName : '';
+            savedState && typeof savedState.customerName === 'string'
+                ? sanitizeCustomerName(savedState.customerName, { uppercase: true })
+                : '';
     }
 
     if (orderDate) {
@@ -1465,6 +1472,10 @@ document.addEventListener('input', (event) => {
     if (!event.target.closest('form')) return;
 
     if (event.target.closest('td')) return;
+
+    if (event.target === customerNameInput) {
+        event.target.value = sanitizeCustomerName(event.target.value, { uppercase: true });
+    }
 
     saveFormState();
 });

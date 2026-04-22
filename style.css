@@ -70,8 +70,10 @@ form {
 fieldset {
     border: none;
     display: flex;
+}
 
-    #customer-name { text-transform: uppercase; }
+#customer-name {
+    text-transform: uppercase;
 }
 
 table {
