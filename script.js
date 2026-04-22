@@ -1165,6 +1165,24 @@ const getItemRows = () =>
 const getFirstRowInput = (row) => row?.querySelector('td input');
 const getRowField = (row, key, tagName = 'input') => row?.querySelector(`${tagName}[id^="${key}-"]`);
 const getTotalOutput = () => document.getElementById('total');
+const validateRequiredFields = (row) => {
+    const requiredInputs = [...(row?.querySelectorAll('input[required]') ?? [])];
+    const firstInvalidInput = requiredInputs.find((input) => !focusInvalidInput(input));
+    return !firstInvalidInput;
+};
+const validatePreviousRequiredRows = (row) => {
+    const itemRows = getItemRows();
+    const rowIndex = itemRows.indexOf(row);
+    if (rowIndex <= 0) return true;
+
+    for (let index = 0; index < rowIndex; index += 1) {
+        if (!validateRequiredFields(itemRows[index])) {
+            return false;
+        }
+    }
+
+    return true;
+};
 const hasMeaningfulRowData = (rowData) => {
     if (!rowData) return false;
 
@@ -1361,6 +1379,9 @@ function updateInvoiceTotal() {
 function focusNextRowInput(input) {
     const row = input.closest('tr');
     if (!row) return;
+    if (!validatePreviousRequiredRows(row) || !validateRequiredFields(row)) {
+        return;
+    }
 
     const itemRows = getItemRows();
     const rowIndex = itemRows.indexOf(row);
@@ -1388,6 +1409,10 @@ function focusNextField(input) {
     const row = input.closest('tr');
     if (!row) return;
 
+    if (!validatePreviousRequiredRows(row)) {
+        return;
+    }
+
     if (input.required && !focusInvalidInput(input)) {
         return;
     }
@@ -1410,9 +1435,7 @@ function getOrAppendNextRow(row) {
     const existingNextRow = itemRows[rowIndex + 1];
     if (existingNextRow) return existingNextRow;
 
-    const requiredInputs = [...row.querySelectorAll('input[required]')];
-    const firstInvalidInput = requiredInputs.find((input) => !focusInvalidInput(input));
-    if (firstInvalidInput) {
+    if (!validateRequiredFields(row)) {
         return row;
     }
 
