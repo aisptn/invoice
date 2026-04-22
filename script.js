@@ -530,7 +530,7 @@ function refreshFormattedNumberInputs() {
             const input = getRowField(row, key);
             if (!(input instanceof HTMLInputElement)) return;
 
-            input.value = formatNumber(sanitizeNumberInput(input.value));
+            input.value = formatNumberInputValue(input.value);
         });
     });
 }
@@ -817,10 +817,23 @@ function downloadBlob(blob, extension) {
     const link = document.createElement('a');
 
     link.href = objectUrl;
-    link.download = `invoice.${extension}`;
+    link.download = `${buildInvoiceFileName()}.${extension}`;
     link.click();
 
     setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
+
+function buildInvoiceFileName() {
+    const formattedDate = (orderDate?.value || new Date().toISOString().split('T')[0]).trim();
+    const sanitizedName = (customerNameInput?.value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+
+    return sanitizedName ? `invoice_${formattedDate}_${sanitizedName}` : `invoice_${formattedDate}`;
 }
 
 function downloadText(content, extension, mimeType) {
@@ -1075,7 +1088,7 @@ const ITEM_ROW_FIELDS = [
         className: 'data-number',
         placeholder: '0',
         inputMode: 'numeric',
-        value: '0'
+        required: true
     },
     {
         kind: 'output',
@@ -1097,6 +1110,10 @@ let lastFocusedInputId = null;
 const getActiveInput = () => document.getElementById(lastFocusedInputId);
 const sanitizeNumberInput = (value) => String(value ?? '').replace(/[^\d]/g, '');
 const formatNumber = (value) => numberFormatter.format(Number(value) || 0);
+const formatNumberInputValue = (value) => {
+    const sanitizedValue = sanitizeNumberInput(value);
+    return sanitizedValue === '' ? '' : formatNumber(sanitizedValue);
+};
 const formatDate = (value) => {
     if (!value) return '';
 
@@ -1125,6 +1142,16 @@ const focusAndSelectInput = (input) => {
 
     input.focus();
     requestAnimationFrame(() => input.select());
+};
+const focusInvalidInput = (input) => {
+    if (!(input instanceof HTMLInputElement)) return false;
+
+    const isValid = input.reportValidity();
+    if (!isValid) {
+        focusAndSelectInput(input);
+    }
+
+    return isValid;
 };
 const getItemRows = () =>
     invoiceTableBody
@@ -1331,6 +1358,10 @@ function focusNextRowInput(input) {
     const itemRows = getItemRows();
     const rowIndex = itemRows.indexOf(row);
     const nextRow = itemRows[rowIndex + 1] ?? getOrAppendNextRow(row);
+    if (!nextRow || nextRow === row) {
+        return;
+    }
+
     focusAndSelectInput(getFirstRowInput(nextRow));
 }
 
@@ -1350,8 +1381,7 @@ function focusNextField(input) {
     const row = input.closest('tr');
     if (!row) return;
 
-    const itemNameInput = getRowField(row, 'item');
-    if (input === itemNameInput && !itemNameInput.reportValidity()) {
+    if (input.required && !focusInvalidInput(input)) {
         return;
     }
 
@@ -1373,8 +1403,9 @@ function getOrAppendNextRow(row) {
     const existingNextRow = itemRows[rowIndex + 1];
     if (existingNextRow) return existingNextRow;
 
-    const itemNameInput = getRowField(row, 'item');
-    if (!itemNameInput?.reportValidity()) {
+    const requiredInputs = [...row.querySelectorAll('input[required]')];
+    const firstInvalidInput = requiredInputs.find((input) => !focusInvalidInput(input));
+    if (firstInvalidInput) {
         return row;
     }
 
@@ -1441,7 +1472,7 @@ document.addEventListener('input', (event) => {
 document.addEventListener('focusout', ({ target }) => {
     if (!isFormattedNumberInput(target)) return;
 
-    target.value = formatNumber(target.value);
+    target.value = formatNumberInputValue(target.value);
     saveFormState();
 });
 
