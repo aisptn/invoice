@@ -1295,6 +1295,66 @@ function appendItemRow(rowData = {}) {
     return row;
 }
 
+function renumberItemRows() {
+    getItemRows().forEach((row, rowIndex) => {
+        const nextIndex = rowIndex + 1;
+
+        row.querySelectorAll('input, output').forEach((element) => {
+            const [key] = element.id.split('-');
+            const nextId = `${key}-${nextIndex}`;
+
+            element.id = nextId;
+            element.name = key === 'item' ? 'item-name' : nextId;
+        });
+    });
+}
+
+function getRowData(row) {
+    return {
+        item: getRowField(row, 'item')?.value ?? '',
+        qty: sanitizeNumberInput(getRowField(row, 'qty')?.value),
+        price: sanitizeNumberInput(getRowField(row, 'price')?.value)
+    };
+}
+
+function duplicateItemRow(row) {
+    if (!row || !invoiceTableBody) return null;
+
+    const duplicatedRow = appendItemRow(getRowData(row));
+    row.after(duplicatedRow);
+    renumberItemRows();
+    updateInvoiceTotal();
+    saveFormState();
+
+    return duplicatedRow;
+}
+
+function deleteItemRow(row) {
+    if (!row) return null;
+
+    const itemRows = getItemRows();
+    if (itemRows.length <= 1) {
+        ['item', 'qty', 'price'].forEach((key) => {
+            const input = getRowField(row, key);
+            if (!(input instanceof HTMLInputElement)) return;
+
+            input.value = key === 'qty' ? '1' : '';
+        });
+        updateInvoiceTotal();
+        saveFormState();
+        return row;
+    }
+
+    const rowIndex = itemRows.indexOf(row);
+    const fallbackRow = itemRows[rowIndex + 1] ?? itemRows[rowIndex - 1] ?? null;
+    row.remove();
+    renumberItemRows();
+    updateInvoiceTotal();
+    saveFormState();
+
+    return fallbackRow;
+}
+
 function collectFormState() {
     return {
         customerName: sanitizeCustomerName(customerNameInput?.value, { lowercase: true }),
@@ -1520,6 +1580,30 @@ document.addEventListener('wheel', (event) => {
 
 document.addEventListener('keydown', (event) => {
     if (!(event.target instanceof HTMLInputElement)) return;
+
+    if (event.ctrlKey && event.altKey && event.key.toLowerCase() === 'd') {
+        const currentRow = event.target.closest('tr');
+        if (!currentRow || !event.target.closest('td')) return;
+
+        event.preventDefault();
+        if (!validatePreviousRequiredRows(currentRow)) {
+            return;
+        }
+
+        if (event.shiftKey) {
+            const focusRow = deleteItemRow(currentRow);
+            focusAndSelectInput(getFirstRowInput(focusRow));
+            return;
+        }
+
+        if (!validateRequiredFields(currentRow)) {
+            return;
+        }
+
+        const duplicatedRow = duplicateItemRow(currentRow);
+        focusAndSelectInput(getFirstRowInput(duplicatedRow));
+        return;
+    }
 
     if (isFormattedNumberInput(event.target) && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
         event.preventDefault();
