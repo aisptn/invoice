@@ -1143,6 +1143,8 @@ const stepNumberInput = (input, delta) => {
 const isTrackedInput = (target) => target instanceof HTMLInputElement && !!target.closest('form');
 const isInteractiveControl = (target) =>
     target instanceof HTMLElement && !!target.closest('button, a, select, textarea, label');
+const isToolbarButton = (target) =>
+    target instanceof HTMLElement && !!target.closest('header nav button');
 const refocusActiveInput = () => getActiveInput()?.focus();
 const focusAndSelectInput = (input) => {
     if (!(input instanceof HTMLInputElement)) return;
@@ -1527,9 +1529,24 @@ document.addEventListener('pointerdown', (event) => {
     refocusActiveInput();
 }, true);
 
+document.addEventListener('pointerup', (event) => {
+    if (!lastFocusedInputId || !isToolbarButton(event.target)) return;
+
+    requestAnimationFrame(() => {
+        if (document.activeElement instanceof HTMLInputElement && isTrackedInput(document.activeElement)) return;
+        refocusActiveInput();
+    });
+});
+
 document.addEventListener('focusout', (event) => {
     if (!isTrackedInput(event.target)) return;
-    if (!lastFocusedInputId || isTrackedInput(event.relatedTarget)) return;
+    if (
+        !lastFocusedInputId ||
+        isTrackedInput(event.relatedTarget) ||
+        isInteractiveControl(event.relatedTarget)
+    ) {
+        return;
+    }
 
     requestAnimationFrame(refocusActiveInput);
 });
