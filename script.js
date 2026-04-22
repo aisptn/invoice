@@ -1108,9 +1108,11 @@ let invoiceTableBody = null;
 
 let lastFocusedInputId = null;
 const getActiveInput = () => document.getElementById(lastFocusedInputId);
+const ALLOWED_TEXT_INPUT_PATTERN = /[ !#-\[\]-~]/g;
 const sanitizeNumberInput = (value) => String(value ?? '').replace(/[^\d]/g, '');
+const sanitizeTextInput = (value) => String(value ?? '').match(ALLOWED_TEXT_INPUT_PATTERN)?.join('') ?? '';
 const sanitizeCustomerName = (value, { lowercase = false, uppercase = false } = {}) => {
-    const sanitizedValue = String(value ?? '').replace(/[^A-Za-z\s]/g, '');
+    const sanitizedValue = sanitizeTextInput(value);
     if (uppercase) return sanitizedValue.toUpperCase();
     return lowercase ? sanitizedValue.toLowerCase() : sanitizedValue;
 };
@@ -1311,7 +1313,7 @@ function renumberItemRows() {
 
 function getRowData(row) {
     return {
-        item: getRowField(row, 'item')?.value ?? '',
+        item: sanitizeTextInput(getRowField(row, 'item')?.value),
         qty: sanitizeNumberInput(getRowField(row, 'qty')?.value),
         price: sanitizeNumberInput(getRowField(row, 'price')?.value)
     };
@@ -1361,7 +1363,7 @@ function collectFormState() {
         orderDate: orderDate?.value ?? '',
         rows: getItemRows()
             .map((row) => ({
-                item: getRowField(row, 'item')?.value ?? '',
+                item: sanitizeTextInput(getRowField(row, 'item')?.value),
                 qty: sanitizeNumberInput(getRowField(row, 'qty')?.value),
                 price: sanitizeNumberInput(getRowField(row, 'price')?.value)
             }))
@@ -1544,6 +1546,8 @@ document.addEventListener('input', (event) => {
 
     if (isFormattedNumberInput(event.target)) {
         event.target.value = sanitizeNumberInput(event.target.value);
+    } else if (event.target.type === 'text') {
+        event.target.value = sanitizeTextInput(event.target.value);
     }
 
     updateInvoiceTotal();
