@@ -72,6 +72,26 @@ fieldset {
     display: flex;
 }
 
+button {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    line-height: 1.1;
+}
+
+button[data-dots]::after {
+    content: attr(data-dots);
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translateX(-50%);
+    min-inline-size: 3ch;
+    text-align: center;
+    pointer-events: none;
+}
+
 #customer-name {
     text-transform: uppercase;
 }

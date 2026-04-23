@@ -439,6 +439,7 @@ function clearButtonState(button) {
     }
 
     button.dataset.confirming = 'false';
+    delete button.dataset.dots;
     button.textContent = getButtonDefaultLabel(button);
     button.disabled = false;
 
@@ -464,7 +465,8 @@ function setTemporaryButtonState(button, message, { duration = 3000, enableDelay
         activeConfirmationButton = button;
     }
     button.disabled = true;
-    button.textContent = `${message}...`;
+    button.textContent = message;
+    button.dataset.dots = '...';
 
     if (duration >= 1000) {
         const suffixes = ['..', '.'];
@@ -479,7 +481,7 @@ function setTemporaryButtonState(button, message, { duration = 3000, enableDelay
                 return;
             }
 
-            button.textContent = `${message}${suffixes[elapsedSeconds - 1]}`;
+            button.dataset.dots = suffixes[elapsedSeconds - 1];
         }, 1000);
     }
 
@@ -602,8 +604,10 @@ async function renderSectionToBlob(type) {
     const form = section?.querySelector('form');
     const customerFieldset = form?.querySelector('fieldset');
     const table = form?.querySelector('table');
+    const headerRow = table?.querySelector('thead tr');
     const firstHeaderCell = table?.querySelector('th');
     const firstItemRow = getItemRows()[0];
+    const totalRow = table?.querySelector('tbody tr:last-child');
     const firstItemInput = getRowField(firstItemRow, 'item');
     const firstQtyInput = getRowField(firstItemRow, 'qty');
     const firstPriceInput = getRowField(firstItemRow, 'price');
@@ -644,21 +648,28 @@ async function renderSectionToBlob(type) {
             parsePixels(itemInputStyles.paddingBottom, 8),
         parsePixels(fieldsetStyles.lineHeight, 32)
     );
-    const headerHeight =
+    const measuredHeaderHeight = headerRow?.getBoundingClientRect().height ?? 0;
+    const measuredRowHeight = firstItemRow?.getBoundingClientRect().height ?? 0;
+    const measuredTotalHeight = totalRow?.getBoundingClientRect().height ?? 0;
+    const headerHeight = Math.max(
+        measuredHeaderHeight,
         parsePixels(headerCellStyles.lineHeight, parsePixels(headerCellStyles.fontSize, 14) * 1.2) +
-        parsePixels(headerCellStyles.paddingTop, 8) +
-        parsePixels(headerCellStyles.paddingBottom, 8);
+            parsePixels(headerCellStyles.paddingTop, 8) +
+            parsePixels(headerCellStyles.paddingBottom, 8)
+    );
     const rowHeight = Math.max(
+        measuredRowHeight,
         parsePixels(itemInputStyles.lineHeight, parsePixels(itemInputStyles.fontSize, 14) * 1.2) +
             parsePixels(itemInputStyles.paddingTop, 8) +
             parsePixels(itemInputStyles.paddingBottom, 8),
         34
     );
     const totalHeight = Math.max(
+        measuredTotalHeight,
+        rowHeight,
         parsePixels(totalOutputStyles.lineHeight, parsePixels(totalOutputStyles.fontSize, 16) * 1.2) +
             parsePixels(totalOutputStyles.paddingTop, 8) +
-            parsePixels(totalOutputStyles.paddingBottom, 8),
-        40
+            parsePixels(totalOutputStyles.paddingBottom, 8)
     );
     const horizontalPadding = parsePixels(sectionStyles?.paddingLeft, sectionPadding);
     const bottomPadding = parsePixels(sectionStyles?.paddingBottom, sectionPadding);
@@ -724,6 +735,17 @@ async function renderSectionToBlob(type) {
             context.fillRect(left, snappedTop, devicePixel, snappedBottom - snappedTop);
         });
     };
+    const getTextBoxMiddle = (text, boxTop, boxHeight) => {
+        const metrics = context.measureText(text || ' ');
+        const ascent = metrics.actualBoundingBoxAscent || 0;
+        const descent = metrics.actualBoundingBoxDescent || 0;
+
+        if (!ascent && !descent) {
+            return boxTop + boxHeight / 2;
+        }
+
+        return boxTop + boxHeight / 2 + (ascent - descent) / 2;
+    };
 
     context.fillStyle = backgroundColor;
     context.fillRect(0, 0, pageWidth, pageHeight);
@@ -737,33 +759,55 @@ async function renderSectionToBlob(type) {
     const customerName = formState.customerName.trim();
 
     context.fillStyle = textColor;
-    context.textBaseline = 'middle';
+    context.textBaseline = 'alphabetic';
     context.textAlign = 'center';
     context.font = buildFont(headingStyles, '700');
-    context.fillText(messages.heading, pageWidth / 2, y + titleHeight / 2);
+    context.fillText(messages.heading, pageWidth / 2, getTextBoxMiddle(messages.heading, y, titleHeight));
     y += titleHeight + sectionGap;
 
     context.font = buildFont(itemInputStyles);
     context.textAlign = 'left';
     if (customerName) {
+        const customerText = customerName.toUpperCase();
         context.fillText(
-            customerName.toUpperCase(),
+            customerText,
             horizontalPadding + fieldHorizontalPadding,
-            y + metaHeight / 2
+            getTextBoxMiddle(customerText, y, metaHeight)
         );
     }
     context.textAlign = 'right';
-    context.fillText(formatDate(formState.orderDate), tableRight - fieldHorizontalPadding, y + metaHeight / 2);
+    const formattedOrderDate = formatDate(formState.orderDate);
+    context.fillText(
+        formattedOrderDate,
+        tableRight - fieldHorizontalPadding,
+        getTextBoxMiddle(formattedOrderDate, y, metaHeight)
+    );
     y += metaHeight + sectionGap;
 
     context.font = buildFont(headerCellStyles, '700');
     context.fillStyle = textColor;
     context.textAlign = 'left';
-    context.fillText(messages.itemLabel, columnLefts[0] + headerHorizontalPadding, y + headerHeight / 2);
+    context.fillText(
+        messages.itemLabel,
+        columnLefts[0] + headerHorizontalPadding,
+        getTextBoxMiddle(messages.itemLabel, y, headerHeight)
+    );
     context.textAlign = 'right';
-    context.fillText(messages.qtyLabel, columnLefts[1] + columnWidths[1] - headerHorizontalPadding, y + headerHeight / 2);
-    context.fillText(messages.priceLabel, columnLefts[2] + columnWidths[2] - headerHorizontalPadding, y + headerHeight / 2);
-    context.fillText(messages.sumLabel, columnLefts[3] + columnWidths[3] - headerHorizontalPadding, y + headerHeight / 2);
+    context.fillText(
+        messages.qtyLabel,
+        columnLefts[1] + columnWidths[1] - headerHorizontalPadding,
+        getTextBoxMiddle(messages.qtyLabel, y, headerHeight)
+    );
+    context.fillText(
+        messages.priceLabel,
+        columnLefts[2] + columnWidths[2] - headerHorizontalPadding,
+        getTextBoxMiddle(messages.priceLabel, y, headerHeight)
+    );
+    context.fillText(
+        messages.sumLabel,
+        columnLefts[3] + columnWidths[3] - headerHorizontalPadding,
+        getTextBoxMiddle(messages.sumLabel, y, headerHeight)
+    );
     y = snapEdge(y + headerHeight);
     const tableBodyTop = y;
 
@@ -776,7 +820,10 @@ async function renderSectionToBlob(type) {
         const cellTop = snapEdge(y);
         const cellBottom = snapEdge(y + rowHeight);
         const snappedRowHeight = cellBottom - cellTop;
-        const cellMiddle = cellTop + snappedRowHeight / 2;
+        const itemText = (row.item || '').toUpperCase();
+        const quantityText = formatNumber(quantity);
+        const priceText = formatNumber(price);
+        const subtotalText = formatNumber(subtotal);
 
         columnWidths.forEach((width, index) => {
             drawFieldBackground(columnLefts[index], cellTop, width, snappedRowHeight);
@@ -786,14 +833,28 @@ async function renderSectionToBlob(type) {
 
         context.fillStyle = textColor;
         context.textAlign = 'left';
-        context.fillText((row.item || '').toUpperCase(), columnLefts[0] + bodyHorizontalPadding, cellMiddle);
+        context.fillText(
+            itemText,
+            columnLefts[0] + bodyHorizontalPadding,
+            getTextBoxMiddle(itemText, cellTop, snappedRowHeight)
+        );
 
         context.textAlign = 'right';
-        context.fillText(formatNumber(quantity), columnLefts[1] + columnWidths[1] - bodyHorizontalPadding, cellMiddle);
-        context.fillText(formatNumber(price), columnLefts[2] + columnWidths[2] - bodyHorizontalPadding, cellMiddle);
-        context.fillText(formatNumber(subtotal), columnLefts[3] + columnWidths[3] - bodyHorizontalPadding, cellMiddle);
-
-        drawHorizontalLine(cellBottom);
+        context.fillText(
+            quantityText,
+            columnLefts[1] + columnWidths[1] - bodyHorizontalPadding,
+            getTextBoxMiddle(quantityText, cellTop, snappedRowHeight)
+        );
+        context.fillText(
+            priceText,
+            columnLefts[2] + columnWidths[2] - bodyHorizontalPadding,
+            getTextBoxMiddle(priceText, cellTop, snappedRowHeight)
+        );
+        context.fillText(
+            subtotalText,
+            columnLefts[3] + columnWidths[3] - bodyHorizontalPadding,
+            getTextBoxMiddle(subtotalText, cellTop, snappedRowHeight)
+        );
 
         y = cellBottom;
     });
@@ -802,14 +863,23 @@ async function renderSectionToBlob(type) {
     const totalTop = snapEdge(y);
     const totalBottom = snapEdge(y + totalHeight);
     const snappedTotalHeight = totalBottom - totalTop;
-    const totalMiddle = totalTop + snappedTotalHeight / 2;
+    const totalLabelText = messages.totalLabel;
+    const totalValueText = formatNumber(total);
     context.font = buildFont(totalOutputStyles, '700');
     context.fillStyle = textColor;
     context.textAlign = 'right';
-    context.fillText(messages.totalLabel, columnLefts[3] - bodyHorizontalPadding, totalMiddle);
+    context.fillText(
+        totalLabelText,
+        columnLefts[3] - bodyHorizontalPadding,
+        getTextBoxMiddle(totalLabelText, totalTop, snappedTotalHeight)
+    );
     drawFieldBackground(columnLefts[3], totalTop, columnWidths[3], snappedTotalHeight);
     context.fillStyle = textColor;
-    context.fillText(formatNumber(total), columnLefts[3] + columnWidths[3] - bodyHorizontalPadding, totalMiddle);
+    context.fillText(
+        totalValueText,
+        columnLefts[3] + columnWidths[3] - bodyHorizontalPadding,
+        getTextBoxMiddle(totalValueText, totalTop, snappedTotalHeight)
+    );
 
     drawHorizontalLine(tableBodyTop);
     renderRows.forEach((_, index) => {
