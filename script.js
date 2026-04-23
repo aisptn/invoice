@@ -433,6 +433,11 @@ function clearButtonState(button) {
         button._temporaryStateEnableTimeoutId = null;
     }
 
+    if (button._temporaryStateIntervalId) {
+        clearInterval(button._temporaryStateIntervalId);
+        button._temporaryStateIntervalId = null;
+    }
+
     button.dataset.confirming = 'false';
     button.textContent = getButtonDefaultLabel(button);
     button.disabled = false;
@@ -459,7 +464,24 @@ function setTemporaryButtonState(button, message, { duration = 3000, enableDelay
         activeConfirmationButton = button;
     }
     button.disabled = true;
-    button.textContent = message;
+    button.textContent = `${message}...`;
+
+    if (duration >= 1000) {
+        const suffixes = ['..', '.'];
+        let elapsedSeconds = 0;
+
+        button._temporaryStateIntervalId = window.setInterval(() => {
+            elapsedSeconds += 1;
+
+            if (elapsedSeconds > suffixes.length) {
+                clearInterval(button._temporaryStateIntervalId);
+                button._temporaryStateIntervalId = null;
+                return;
+            }
+
+            button.textContent = `${message}${suffixes[elapsedSeconds - 1]}`;
+        }, 1000);
+    }
 
     if (enableDelay > 0) {
         button._temporaryStateEnableTimeoutId = window.setTimeout(() => {
@@ -844,12 +866,7 @@ function downloadText(content, extension, mimeType) {
 function setButtonFeedback(button, message, duration = 3000) {
     if (!(button instanceof HTMLButtonElement)) return;
 
-    clearButtonState(button);
-    button.disabled = true;
-    button.textContent = message;
-    button._feedbackTimeoutId = window.setTimeout(() => {
-        clearButtonState(button);
-    }, duration);
+    setTemporaryButtonState(button, message, { duration });
 }
 
 async function handleSaveAction() {
