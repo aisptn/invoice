@@ -1,22 +1,21 @@
 :root {
-    --paper-height: 210mm;
-    --paper-width: 210mm;
-    --page-space: calc(min(var(--paper-height), var(--paper-width)) * 0.05);
-    --paper-safe-width: min(var(--paper-width), calc(100vw - 2rem));
-    --paper-scale: min(1, calc(var(--paper-safe-width) / var(--paper-width)));
-    --invoice-font-size: 16px;
-    --invoice-line-height: 1.2;
-    --invoice-heading-size: 3rem;
-    --invoice-table-heading-size: 1rem;
+    --paper-size: 210mm;
+    --page-space: calc(var(--paper-size) * 0.05);
+    --paper-safe-width: min(var(--paper-size), calc(100vw - 2rem));
+    --paper-scale: min(1, calc(var(--paper-safe-width) / var(--paper-size)));
+    --font-size: 16px;
+    --line-height: 1.2;
+    --heading-size: 3rem;
+    --table-heading-size: 1rem;
 }
 
 body {
     background: black;
     display: flex;
-    font-size: var(--invoice-font-size);
+    font-size: var(--font-size);
     flex-direction: column;
     height: 100vh;
-    line-height: var(--invoice-line-height);
+    line-height: var(--line-height);
 }
 
 header {
@@ -41,7 +40,7 @@ main {
     flex-direction: column;
     justify-content: center;
     margin-inline: auto;
-    width: var(--paper-width);
+    width: var(--paper-size);
     zoom: var(--paper-scale);
 }
 
@@ -52,12 +51,12 @@ section {
     flex-direction: column;
     gap: var(--page-space);
     padding: var(--page-space);
-    width: var(--paper-width);
+    width: var(--paper-size);
 
     h1 {
-        font-size: var(--invoice-heading-size);
+        font-size: var(--heading-size);
         font-weight: 700;
-        line-height: var(--invoice-line-height);
+        line-height: var(--line-height);
         text-align: center;
     }
 }
@@ -83,9 +82,9 @@ table {
     width: 100%;
     
     th {
-        font-size: var(--invoice-table-heading-size);
+        font-size: var(--table-heading-size);
         font-weight: 700;
-        line-height: var(--invoice-line-height);
+        line-height: var(--line-height);
         padding: 0.5em 1em;
     }
     td {
