@@ -418,6 +418,16 @@ function syncCopyButtonAvailability() {
 function clearButtonState(button) {
     if (!(button instanceof HTMLButtonElement)) return;
 
+    if (button.classList.contains('floating-confirm')) {
+        button.remove();
+        clearButton.style.opacity = '';
+        openButton.style.opacity = '';
+        if (button === activeTimedButton) {
+            activeTimedButton = null;
+        }
+        return;
+    }
+
     if (button._feedbackTimeoutId) {
         clearTimeout(button._feedbackTimeoutId);
         button._feedbackTimeoutId = null;
@@ -1101,11 +1111,91 @@ function handleOpenAction() {
     }
 
     if (openButton.dataset.confirming !== 'true' && hasUnsavedInvoiceData()) {
-        setTemporaryButtonState(openButton, messages.openPrompt, {
-            duration: 3000,
-            enableDelay: 300,
-            confirming: true
+        const fieldset = clearButton.parentElement;
+        if (!fieldset) return;
+
+        const clearRect = clearButton.getBoundingClientRect();
+        const openRect = openButton.getBoundingClientRect();
+        const combinedLeft = Math.min(clearRect.left, openRect.left);
+        const combinedTop = Math.min(clearRect.top, openRect.top);
+        const combinedWidth = clearRect.width + openRect.width;
+        const combinedHeight = Math.max(clearRect.height, openRect.height);
+        const fieldsetRect = fieldset.getBoundingClientRect();
+
+        const floatingButton = createElement('button', {
+            className: 'floating-confirm',
+            textContent: messages.openPrompt,
+            attributes: {
+                style: `position: absolute; left: ${combinedLeft - fieldsetRect.left}px; top: ${combinedTop - fieldsetRect.top}px; width: ${combinedWidth}px; height: ${combinedHeight}px; z-index: 10;`
+            }
         });
+
+        fieldset.style.position = 'relative';
+        fieldset.appendChild(floatingButton);
+        clearButton.style.opacity = '0';
+        openButton.style.opacity = '0';
+
+        // Inherit timed button behavior
+        if (activeTimedButton && activeTimedButton !== floatingButton) {
+            clearButtonState(activeTimedButton);
+        }
+
+        floatingButton.dataset.confirming = 'true';
+        activeTimedButton = floatingButton;
+        floatingButton.disabled = true;
+        floatingButton.dataset.dots = '...';
+
+        const suffixes = ['..', '.'];
+        let elapsedSeconds = 0;
+
+        floatingButton._temporaryStateIntervalId = window.setInterval(() => {
+            elapsedSeconds += 1;
+
+            if (elapsedSeconds > suffixes.length) {
+                clearInterval(floatingButton._temporaryStateIntervalId);
+                floatingButton._temporaryStateIntervalId = null;
+                return;
+            }
+
+            floatingButton.dataset.dots = suffixes[elapsedSeconds - 1];
+        }, 1000);
+
+        floatingButton._temporaryStateEnableTimeoutId = window.setTimeout(() => {
+            floatingButton.disabled = false;
+            floatingButton._temporaryStateEnableTimeoutId = null;
+        }, 300);
+
+        const cleanup = () => {
+            if (floatingButton.parentElement) {
+                floatingButton.remove();
+                clearButton.style.opacity = '';
+                openButton.style.opacity = '';
+            }
+            if (activeTimedButton === floatingButton) {
+                activeTimedButton = null;
+            }
+            if (floatingButton._temporaryStateIntervalId) {
+                clearInterval(floatingButton._temporaryStateIntervalId);
+                floatingButton._temporaryStateIntervalId = null;
+            }
+            if (floatingButton._temporaryStateEnableTimeoutId) {
+                clearTimeout(floatingButton._temporaryStateEnableTimeoutId);
+                floatingButton._temporaryStateEnableTimeoutId = null;
+            }
+            if (floatingButton._temporaryStateTimeoutId) {
+                clearTimeout(floatingButton._temporaryStateTimeoutId);
+                floatingButton._temporaryStateTimeoutId = null;
+            }
+        };
+
+        floatingButton._temporaryStateTimeoutId = window.setTimeout(cleanup, 3000);
+
+        floatingButton.addEventListener('click', () => {
+            cleanup();
+            openFileInput.value = '';
+            openFileInput.click();
+        });
+
         return;
     }
 
