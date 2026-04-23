@@ -296,7 +296,7 @@ const formatButton = document.getElementById('format');
 const languageButton = document.getElementById('language');
 const themeButton = document.getElementById('theme');
 const colorSchemeMeta = document.querySelector('meta[name="color-scheme"]');
-let activeConfirmationButton = null;
+let activeTimedButton = null;
 const openFileInput = createElement('input', {
     attributes: {
         type: 'file',
@@ -447,23 +447,21 @@ function clearButtonState(button) {
         syncCopyButtonAvailability();
     }
 
-    if (button === activeConfirmationButton) {
-        activeConfirmationButton = null;
+    if (button === activeTimedButton) {
+        activeTimedButton = null;
     }
 }
 
 function setTemporaryButtonState(button, message, { duration = 3000, enableDelay = 0, confirming = false } = {}) {
     if (!(button instanceof HTMLButtonElement)) return;
 
-    if (confirming && activeConfirmationButton && activeConfirmationButton !== button) {
-        clearButtonState(activeConfirmationButton);
+    if (activeTimedButton && activeTimedButton !== button) {
+        clearButtonState(activeTimedButton);
     }
 
     clearButtonState(button);
     button.dataset.confirming = confirming ? 'true' : 'false';
-    if (confirming) {
-        activeConfirmationButton = button;
-    }
+    activeTimedButton = button;
     button.disabled = true;
     button.textContent = message;
     button.dataset.dots = '...';
