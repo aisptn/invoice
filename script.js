@@ -79,23 +79,26 @@ const browserLanguage = navigator.language.toLowerCase();
 const languageCode = browserLanguage.split('-')[0];
 const LANGUAGE_STORAGE_KEY = 'invoice-language';
 const LANGUAGE_MODES = ['auto', 'en', 'id'];
+const DEFAULT_LANGUAGE_MODE = LANGUAGE_MODES[0];
 const resolveLocale = (mode) => {
     if (mode === 'en' || mode === 'id') return mode;
     return browserLanguage in TRANSLATIONS ? browserLanguage : languageCode in TRANSLATIONS ? languageCode : 'en';
 };
-let locale = resolveLocale('auto');
+let locale = resolveLocale(DEFAULT_LANGUAGE_MODE);
 let messages = TRANSLATIONS[locale];
 let numberFormatter = new Intl.NumberFormat(locale);
 const STORAGE_KEY = 'invoice-form-data';
 const THEME_STORAGE_KEY = 'invoice-theme';
 const COPY_FORMAT_STORAGE_KEY = 'invoice-copy-format';
 const THEME_MODES = ['auto', 'light', 'dark'];
+const DEFAULT_THEME_MODE = THEME_MODES[0];
 const THEME_META_CONTENT = {
     auto: 'dark light',
     light: 'light',
     dark: 'dark'
 };
 const COPY_FORMATS = ['png', 'json'];
+const DEFAULT_COPY_FORMAT = COPY_FORMATS[0];
 const unsupportedCopyFormats = new Set();
 const EMPTY_COPY_DEBUG = {
     getCause() {
@@ -138,6 +141,31 @@ function shouldForceUnsupportedCopyFormat(format) {
 function getDebugCopyCause(format) {
     return (globalThis.__INVOICE_COPY_DEBUG__ || EMPTY_COPY_DEBUG).getCause(format);
 }
+
+function getStoredValue(key, allowedValues, fallback) {
+    const value = localStorage.getItem(key);
+    return allowedValues.includes(value) ? value : fallback;
+}
+
+function getNextOption(options, currentValue) {
+    const currentIndex = options.indexOf(currentValue);
+    return options[(currentIndex + 1) % options.length];
+}
+
+function getModeLabel(prefix, value) {
+    return messages[`${prefix}${value[0].toUpperCase()}${value.slice(1)}`] ?? value;
+}
+
+function updateModeButton(button, prefix, value) {
+    if (!(button instanceof HTMLButtonElement)) return;
+
+    button.textContent = `${messages[`${prefix}Button`]}${getModeLabel(prefix, value)}`;
+}
+
+const getSavedLanguageMode = () => getStoredValue(LANGUAGE_STORAGE_KEY, LANGUAGE_MODES, DEFAULT_LANGUAGE_MODE);
+const getSavedThemeMode = () => getStoredValue(THEME_STORAGE_KEY, THEME_MODES, DEFAULT_THEME_MODE);
+const getSavedCopyFormat = () => getStoredValue(COPY_FORMAT_STORAGE_KEY, COPY_FORMATS, DEFAULT_COPY_FORMAT);
+const getTodayString = () => new Date().toISOString().split('T')[0];
 
 function createElement(tagName, options = {}) {
     const element = document.createElement(tagName);
@@ -309,11 +337,13 @@ const openFileInput = createElement('input', {
 
 document.body.append(openFileInput);
 
-function updateLanguageButton(mode) {
-    if (!languageButton) return;
+function openInvoiceFilePicker() {
+    openFileInput.value = '';
+    openFileInput.click();
+}
 
-    const modeLabel = messages[`language${mode[0].toUpperCase()}${mode.slice(1)}`] ?? mode;
-    languageButton.textContent = `${messages.languageButton}${modeLabel}`;
+function updateLanguageButton(mode) {
+    updateModeButton(languageButton, 'language', mode);
 }
 
 function applyTranslations() {
@@ -368,25 +398,19 @@ function applyTranslations() {
         totalLabel.textContent = messages.totalLabel;
     }
 
-    updateFormatButton(localStorage.getItem(COPY_FORMAT_STORAGE_KEY) || COPY_FORMATS[0]);
-    updateLanguageButton(localStorage.getItem(LANGUAGE_STORAGE_KEY) || 'auto');
-    updateThemeButton(localStorage.getItem(THEME_STORAGE_KEY) || 'auto');
+    updateFormatButton(getSavedCopyFormat());
+    updateLanguageButton(getSavedLanguageMode());
+    updateThemeButton(getSavedThemeMode());
 }
 
 applyTranslations();
 
 function updateThemeButton(mode) {
-    if (!themeButton) return;
-
-    const modeLabel = messages[`theme${mode[0].toUpperCase()}${mode.slice(1)}`] ?? mode;
-    themeButton.textContent = `${messages.themeButton}${modeLabel}`;
+    updateModeButton(themeButton, 'theme', mode);
 }
 
 function updateFormatButton(format) {
-    if (!formatButton) return;
-
-    const formatLabel = messages[`format${format[0].toUpperCase()}${format.slice(1)}`] ?? format;
-    formatButton.textContent = `${messages.formatButton}${formatLabel}`;
+    updateModeButton(formatButton, 'format', format);
 }
 
 function getButtonDefaultLabel(button) {
@@ -397,8 +421,7 @@ function getButtonDefaultLabel(button) {
 }
 
 function getCopyDisabledMessage(format) {
-    const formatLabel = messages[`format${format[0].toUpperCase()}${format.slice(1)}`] ?? format;
-    return `${messages.copyDisabled}${formatLabel}`;
+    return `${messages.copyDisabled}${getModeLabel('format', format)}`;
 }
 
 function hasRememberedUnsupportedCopyFormat(format) {
@@ -408,25 +431,15 @@ function hasRememberedUnsupportedCopyFormat(format) {
 function syncCopyButtonAvailability() {
     if (!(copyButton instanceof HTMLButtonElement)) return;
 
-    const format = localStorage.getItem(COPY_FORMAT_STORAGE_KEY) || COPY_FORMATS[0];
+    const format = getSavedCopyFormat();
     const isUnsupported = hasRememberedUnsupportedCopyFormat(format);
 
     copyButton.title = isUnsupported ? getCopyDisabledMessage(format) : '';
     copyButton.disabled = isUnsupported;
 }
 
-function clearButtonState(button) {
+function clearScheduledButtonTimers(button) {
     if (!(button instanceof HTMLButtonElement)) return;
-
-    if (button.classList.contains('floating-confirm')) {
-        button.remove();
-        clearButton.style.opacity = '';
-        openButton.style.opacity = '';
-        if (button === activeTimedButton) {
-            activeTimedButton = null;
-        }
-        return;
-    }
 
     if (button._feedbackTimeoutId) {
         clearTimeout(button._feedbackTimeoutId);
@@ -446,6 +459,50 @@ function clearButtonState(button) {
     if (button._temporaryStateIntervalId) {
         clearInterval(button._temporaryStateIntervalId);
         button._temporaryStateIntervalId = null;
+    }
+}
+
+function startButtonDotsCountdown(button, duration) {
+    if (!(button instanceof HTMLButtonElement) || duration < 1000) return;
+
+    const suffixes = ['..', '.'];
+    let elapsedSeconds = 0;
+
+    button._temporaryStateIntervalId = window.setInterval(() => {
+        elapsedSeconds += 1;
+
+        if (elapsedSeconds > suffixes.length) {
+            clearInterval(button._temporaryStateIntervalId);
+            button._temporaryStateIntervalId = null;
+            return;
+        }
+
+        button.dataset.dots = suffixes[elapsedSeconds - 1];
+    }, 1000);
+}
+
+function enableButtonAfterDelay(button, delay) {
+    if (!(button instanceof HTMLButtonElement) || delay <= 0) return;
+
+    button._temporaryStateEnableTimeoutId = window.setTimeout(() => {
+        button.disabled = false;
+        button._temporaryStateEnableTimeoutId = null;
+    }, delay);
+}
+
+function clearButtonState(button) {
+    if (!(button instanceof HTMLButtonElement)) return;
+
+    clearScheduledButtonTimers(button);
+
+    if (button.classList.contains('floating-confirm')) {
+        button.remove();
+        clearButton.style.opacity = '';
+        openButton.style.opacity = '';
+        if (button === activeTimedButton) {
+            activeTimedButton = null;
+        }
+        return;
     }
 
     button.dataset.confirming = 'false';
@@ -476,29 +533,8 @@ function setTemporaryButtonState(button, message, { duration = 3000, enableDelay
     button.textContent = message;
     button.dataset.dots = '...';
 
-    if (duration >= 1000) {
-        const suffixes = ['..', '.'];
-        let elapsedSeconds = 0;
-
-        button._temporaryStateIntervalId = window.setInterval(() => {
-            elapsedSeconds += 1;
-
-            if (elapsedSeconds > suffixes.length) {
-                clearInterval(button._temporaryStateIntervalId);
-                button._temporaryStateIntervalId = null;
-                return;
-            }
-
-            button.dataset.dots = suffixes[elapsedSeconds - 1];
-        }, 1000);
-    }
-
-    if (enableDelay > 0) {
-        button._temporaryStateEnableTimeoutId = window.setTimeout(() => {
-            button.disabled = false;
-            button._temporaryStateEnableTimeoutId = null;
-        }, enableDelay);
-    }
+    startButtonDotsCountdown(button, duration);
+    enableButtonAfterDelay(button, enableDelay);
 
     button._temporaryStateTimeoutId = window.setTimeout(() => {
         clearButtonState(button);
@@ -534,7 +570,7 @@ clearButton.addEventListener('click', () => {
 });
 
 function setTheme(mode) {
-    const nextTheme = THEME_MODES.includes(mode) ? mode : 'auto';
+    const nextTheme = THEME_MODES.includes(mode) ? mode : DEFAULT_THEME_MODE;
     const metaContent = THEME_META_CONTENT[nextTheme];
 
     if (colorSchemeMeta) {
@@ -547,11 +583,7 @@ function setTheme(mode) {
 }
 
 function toggleTheme() {
-    const currentTheme = localStorage.getItem(THEME_STORAGE_KEY) || 'auto';
-    const currentIndex = THEME_MODES.indexOf(currentTheme);
-    const nextTheme = THEME_MODES[(currentIndex + 1) % THEME_MODES.length];
-
-    setTheme(nextTheme);
+    setTheme(getNextOption(THEME_MODES, getSavedThemeMode()));
 }
 
 themeButton?.addEventListener('click', toggleTheme);
@@ -568,7 +600,7 @@ function refreshFormattedNumberInputs() {
 }
 
 function setLanguage(mode) {
-    const nextLanguage = LANGUAGE_MODES.includes(mode) ? mode : 'auto';
+    const nextLanguage = LANGUAGE_MODES.includes(mode) ? mode : DEFAULT_LANGUAGE_MODE;
     localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
     locale = resolveLocale(nextLanguage);
     messages = TRANSLATIONS[locale];
@@ -579,28 +611,20 @@ function setLanguage(mode) {
 }
 
 function toggleLanguage() {
-    const currentLanguage = localStorage.getItem(LANGUAGE_STORAGE_KEY) || 'auto';
-    const currentIndex = LANGUAGE_MODES.indexOf(currentLanguage);
-    const nextLanguage = LANGUAGE_MODES[(currentIndex + 1) % LANGUAGE_MODES.length];
-
-    setLanguage(nextLanguage);
+    setLanguage(getNextOption(LANGUAGE_MODES, getSavedLanguageMode()));
 }
 
 languageButton?.addEventListener('click', toggleLanguage);
 
 function setCopyFormat(format) {
-    const nextFormat = COPY_FORMATS.includes(format) ? format : COPY_FORMATS[0];
+    const nextFormat = COPY_FORMATS.includes(format) ? format : DEFAULT_COPY_FORMAT;
     localStorage.setItem(COPY_FORMAT_STORAGE_KEY, nextFormat);
     updateFormatButton(nextFormat);
     syncCopyButtonAvailability();
 }
 
 function toggleCopyFormat() {
-    const currentFormat = localStorage.getItem(COPY_FORMAT_STORAGE_KEY) || COPY_FORMATS[0];
-    const currentIndex = COPY_FORMATS.indexOf(currentFormat);
-    const nextFormat = COPY_FORMATS[(currentIndex + 1) % COPY_FORMATS.length];
-
-    setCopyFormat(nextFormat);
+    setCopyFormat(getNextOption(COPY_FORMATS, getSavedCopyFormat()));
 }
 
 async function renderSectionToBlob(type) {
@@ -924,7 +948,7 @@ function downloadBlob(blob, extension) {
 }
 
 function buildInvoiceFileName() {
-    const formattedDate = (orderDate?.value || new Date().toISOString().split('T')[0]).trim();
+    const formattedDate = (orderDate?.value || getTodayString()).trim();
     const sanitizedName = (customerNameInput?.value || '')
         .trim()
         .toLowerCase()
@@ -948,7 +972,7 @@ function setButtonFeedback(button, message, duration = 3000) {
 }
 
 async function handleSaveAction() {
-    const format = localStorage.getItem(COPY_FORMAT_STORAGE_KEY) || COPY_FORMATS[0];
+    const format = getSavedCopyFormat();
     const button = saveButton;
     const successMessage = messages.saveSuccess;
 
@@ -995,7 +1019,7 @@ async function handleSaveAction() {
 }
 
 async function handleCopyAction() {
-    const format = localStorage.getItem(COPY_FORMAT_STORAGE_KEY) || COPY_FORMATS[0];
+    const format = getSavedCopyFormat();
     const button = copyButton;
     const debugCause = getDebugCopyCause(format);
 
@@ -1105,6 +1129,60 @@ async function handleCopyAction() {
     setButtonFeedback(button, messages.copySuccess);
 }
 
+function showOpenConfirmationPrompt(fieldset) {
+    const clearRect = clearButton.getBoundingClientRect();
+    const openRect = openButton.getBoundingClientRect();
+    const combinedLeft = Math.min(clearRect.left, openRect.left);
+    const combinedTop = Math.min(clearRect.top, openRect.top);
+    const combinedWidth = clearRect.width + openRect.width;
+    const combinedHeight = Math.max(clearRect.height, openRect.height);
+    const fieldsetRect = fieldset.getBoundingClientRect();
+    const floatingButton = createElement('button', {
+        className: 'floating-confirm',
+        textContent: messages.openPrompt,
+        attributes: {
+            style: `position: absolute; left: ${combinedLeft - fieldsetRect.left}px; top: ${combinedTop - fieldsetRect.top}px; width: ${combinedWidth}px; height: ${combinedHeight}px; z-index: 10;`
+        }
+    });
+
+    fieldset.style.position = 'relative';
+    fieldset.appendChild(floatingButton);
+    clearButton.style.opacity = '0';
+    openButton.style.opacity = '0';
+
+    if (activeTimedButton && activeTimedButton !== floatingButton) {
+        clearButtonState(activeTimedButton);
+    }
+
+    floatingButton.dataset.confirming = 'true';
+    floatingButton.disabled = true;
+    floatingButton.dataset.dots = '...';
+    activeTimedButton = floatingButton;
+
+    startButtonDotsCountdown(floatingButton, 3000);
+    enableButtonAfterDelay(floatingButton, 300);
+
+    const cleanup = () => {
+        clearScheduledButtonTimers(floatingButton);
+
+        if (floatingButton.parentElement) {
+            floatingButton.remove();
+            clearButton.style.opacity = '';
+            openButton.style.opacity = '';
+        }
+
+        if (activeTimedButton === floatingButton) {
+            activeTimedButton = null;
+        }
+    };
+
+    floatingButton._temporaryStateTimeoutId = window.setTimeout(cleanup, 3000);
+    floatingButton.addEventListener('click', () => {
+        cleanup();
+        openInvoiceFilePicker();
+    });
+}
+
 function handleOpenAction() {
     if (!(openButton instanceof HTMLButtonElement) || openButton.disabled) {
         return;
@@ -1113,94 +1191,11 @@ function handleOpenAction() {
     if (openButton.dataset.confirming !== 'true' && hasUnsavedInvoiceData()) {
         const fieldset = clearButton.parentElement;
         if (!fieldset) return;
-
-        const clearRect = clearButton.getBoundingClientRect();
-        const openRect = openButton.getBoundingClientRect();
-        const combinedLeft = Math.min(clearRect.left, openRect.left);
-        const combinedTop = Math.min(clearRect.top, openRect.top);
-        const combinedWidth = clearRect.width + openRect.width;
-        const combinedHeight = Math.max(clearRect.height, openRect.height);
-        const fieldsetRect = fieldset.getBoundingClientRect();
-
-        const floatingButton = createElement('button', {
-            className: 'floating-confirm',
-            textContent: messages.openPrompt,
-            attributes: {
-                style: `position: absolute; left: ${combinedLeft - fieldsetRect.left}px; top: ${combinedTop - fieldsetRect.top}px; width: ${combinedWidth}px; height: ${combinedHeight}px; z-index: 10;`
-            }
-        });
-
-        fieldset.style.position = 'relative';
-        fieldset.appendChild(floatingButton);
-        clearButton.style.opacity = '0';
-        openButton.style.opacity = '0';
-
-        // Inherit timed button behavior
-        if (activeTimedButton && activeTimedButton !== floatingButton) {
-            clearButtonState(activeTimedButton);
-        }
-
-        floatingButton.dataset.confirming = 'true';
-        activeTimedButton = floatingButton;
-        floatingButton.disabled = true;
-        floatingButton.dataset.dots = '...';
-
-        const suffixes = ['..', '.'];
-        let elapsedSeconds = 0;
-
-        floatingButton._temporaryStateIntervalId = window.setInterval(() => {
-            elapsedSeconds += 1;
-
-            if (elapsedSeconds > suffixes.length) {
-                clearInterval(floatingButton._temporaryStateIntervalId);
-                floatingButton._temporaryStateIntervalId = null;
-                return;
-            }
-
-            floatingButton.dataset.dots = suffixes[elapsedSeconds - 1];
-        }, 1000);
-
-        floatingButton._temporaryStateEnableTimeoutId = window.setTimeout(() => {
-            floatingButton.disabled = false;
-            floatingButton._temporaryStateEnableTimeoutId = null;
-        }, 300);
-
-        const cleanup = () => {
-            if (floatingButton.parentElement) {
-                floatingButton.remove();
-                clearButton.style.opacity = '';
-                openButton.style.opacity = '';
-            }
-            if (activeTimedButton === floatingButton) {
-                activeTimedButton = null;
-            }
-            if (floatingButton._temporaryStateIntervalId) {
-                clearInterval(floatingButton._temporaryStateIntervalId);
-                floatingButton._temporaryStateIntervalId = null;
-            }
-            if (floatingButton._temporaryStateEnableTimeoutId) {
-                clearTimeout(floatingButton._temporaryStateEnableTimeoutId);
-                floatingButton._temporaryStateEnableTimeoutId = null;
-            }
-            if (floatingButton._temporaryStateTimeoutId) {
-                clearTimeout(floatingButton._temporaryStateTimeoutId);
-                floatingButton._temporaryStateTimeoutId = null;
-            }
-        };
-
-        floatingButton._temporaryStateTimeoutId = window.setTimeout(cleanup, 3000);
-
-        floatingButton.addEventListener('click', () => {
-            cleanup();
-            openFileInput.value = '';
-            openFileInput.click();
-        });
-
+        showOpenConfirmationPrompt(fieldset);
         return;
     }
 
-    openFileInput.value = '';
-    openFileInput.click();
+    openInvoiceFilePicker();
 }
 
 formatButton?.addEventListener('click', toggleCopyFormat);
@@ -1230,7 +1225,7 @@ openFileInput.addEventListener('change', async (event) => {
 
 const orderDate = document.getElementById('order-date');
 if (orderDate) {
-    orderDate.value = new Date().toISOString().split('T')[0];
+    orderDate.value = getTodayString();
 }
 
 const invoiceTable = document.getElementById('invoice-table');
@@ -1272,6 +1267,7 @@ const ITEM_ROW_FIELDS = [
         value: '0'
     }
 ];
+const ITEM_DATA_KEYS = ITEM_ROW_FIELDS.filter(({ kind }) => kind === 'input').map(({ key }) => key);
 const TABLE_HEADER_FIELDS = [
     { key: 'itemLabel', className: 'four-tenths data-text' },
     { key: 'qtyLabel', className: 'one-tenth data-number' },
@@ -1344,6 +1340,15 @@ const getItemRows = () =>
 const getFirstRowInput = (row) => row?.querySelector('td input');
 const getRowField = (row, key, tagName = 'input') => row?.querySelector(`${tagName}[id^="${key}-"]`);
 const getTotalOutput = () => document.getElementById('total');
+const ROW_FIELD_SANITIZERS = {
+    item: sanitizeTextInput,
+    qty: sanitizeNumberInput,
+    price: sanitizeNumberInput
+};
+const getRowData = (row) =>
+    Object.fromEntries(
+        ITEM_DATA_KEYS.map((key) => [key, (ROW_FIELD_SANITIZERS[key] ?? String)(getRowField(row, key)?.value)])
+    );
 const validateRequiredFields = (row) => {
     const requiredInputs = [...(row?.querySelectorAll('input[required]') ?? [])];
     const firstInvalidInput = requiredInputs.find((input) => !focusInvalidInput(input));
@@ -1488,14 +1493,6 @@ function renumberItemRows() {
     });
 }
 
-function getRowData(row) {
-    return {
-        item: sanitizeTextInput(getRowField(row, 'item')?.value),
-        qty: sanitizeNumberInput(getRowField(row, 'qty')?.value),
-        price: sanitizeNumberInput(getRowField(row, 'price')?.value)
-    };
-}
-
 function duplicateItemRow(row) {
     if (!row || !invoiceTableBody) return null;
 
@@ -1513,7 +1510,7 @@ function deleteItemRow(row) {
 
     const itemRows = getItemRows();
     if (itemRows.length <= 1) {
-        ['item', 'qty', 'price'].forEach((key) => {
+        ITEM_DATA_KEYS.forEach((key) => {
             const input = getRowField(row, key);
             if (!(input instanceof HTMLInputElement)) return;
 
@@ -1538,13 +1535,7 @@ function collectFormState() {
     return {
         customerName: sanitizeCustomerName(customerNameInput?.value, { lowercase: true }),
         orderDate: orderDate?.value ?? '',
-        rows: getItemRows()
-            .map((row) => ({
-                item: sanitizeTextInput(getRowField(row, 'item')?.value),
-                qty: sanitizeNumberInput(getRowField(row, 'qty')?.value),
-                price: sanitizeNumberInput(getRowField(row, 'price')?.value)
-            }))
-            .filter(hasMeaningfulRowData)
+        rows: getItemRows().map(getRowData).filter(hasMeaningfulRowData)
     };
 }
 
@@ -1574,7 +1565,7 @@ function restoreFormState(savedState) {
         orderDate.value =
             savedState && typeof savedState.orderDate === 'string' && savedState.orderDate
                 ? savedState.orderDate
-                : new Date().toISOString().split('T')[0];
+                : getTodayString();
     }
 
     const savedRows =
@@ -1682,9 +1673,9 @@ function getOrAppendNextRow(row) {
 }
 
 initializeInvoiceTable();
-setLanguage(localStorage.getItem(LANGUAGE_STORAGE_KEY) || 'auto');
-setCopyFormat(localStorage.getItem(COPY_FORMAT_STORAGE_KEY) || COPY_FORMATS[0]);
-setTheme(localStorage.getItem(THEME_STORAGE_KEY) || 'auto');
+setLanguage(getSavedLanguageMode());
+setCopyFormat(getSavedCopyFormat());
+setTheme(getSavedThemeMode());
 restoreFormState(loadFormState());
 updateInvoiceTotal();
 saveFormState();
